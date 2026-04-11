@@ -1,70 +1,28 @@
 # 代码规范
 
-## 1. 文件头部规范
+## 1. 文件头部
 
-- **禁止在代码文件最上方写文档字符串（docstring）或注释**
-- 文件第一行应为实际的代码（import、定义等）
-- 模块级文档应放在 README 或专门的文档文件中
+- 文件第一行必须是代码（import/定义），**禁止顶部写文档字符串**
+- 模块文档放 README
 
-### ❌ 禁止示例
 ```python
-"""Hermes 工具系统 - 类似 Claude Code 的 Bash 优先设计"""
-
+# ❌ 禁止
+"""模块说明"""
 import os
-...
-```
 
-### ✅ 正确示例
-```python
+# ✅ 正确
 import os
 import subprocess
-...
-```
-
-## 2. JSON 处理
-
-- **只使用 `orjson`**，禁止使用标准库 `json`
-- `orjson` 性能更好，且支持 bytes 输入
-
-### 使用示例
-
-```python
-import orjson
-
-# 序列化
-data = {"key": "value"}
-json_bytes = orjson.dumps(data)  # 返回 bytes
-json_str = json_bytes.decode("utf-8")  # 需要字符串时解码
-
-# 反序列化
-parsed = orjson.loads(json_bytes)  # 支持 bytes
-parsed = orjson.loads(json_str)    # 也支持 str
 ```
 
 ## 2. Import 规范
 
-### 位置要求
+分组（每组空一行）：
+1. 标准库 (`os`, `sys`, `typing`)
+2. 第三方库 (`orjson`, `langchain`)
+3. 本地项目 (`hermes.config`)
 
-- **所有 import 语句必须放在文件顶部**
-- **例外情况**：仅在需要解决循环引用（circular import）时，才允许将 import 放在函数内部
-
-### 分组与排序
-
-按照 PEP 8 标准，import 分为三组，每组之间空一行：
-
-1. **标准库导入**（如 `os`, `sys`, `typing`）
-2. **第三方库导入**（如 `orjson`, `langchain`）
-3. **本地应用/项目导入**（如 `hermes.config`）
-
-每组内部按字母顺序排序。
-
-### 格式规范
-
-- 优先使用 `from x import y` 形式导入具体类/函数
-- 避免使用 `import *`
-- 类型提示需要导入时，使用 `from __future__ import annotations` 配合字符串前向引用
-
-### 示例
+每组内按字母排序，优先用 `from x import y`。
 
 ```python
 from __future__ import annotations
@@ -75,18 +33,46 @@ from typing import Any, Dict
 
 import orjson
 from langchain_openai import ChatOpenAI
-from rich.console import Console
 
 from hermes.config import Config
-from hermes.tools import TOOLS
 ```
 
-### 循环引用例外示例
+- 循环引用时才允许函数内 import
+- 类型提示用 `from __future__ import annotations` + 字符串引用
+
+## 3. 技术栈
+
+| 用途 | 必选 |
+|------|------|
+| JSON | `orjson`（性能更好，支持 bytes）|
+| Python 执行 | `uv run python` |
+
+```bash
+# ✅ 正确
+uv run python -c "print('OK')"
+uv run python script.py
+
+# ❌ 禁止裸命令
+python script.py
+python3 script.py
+```
+
+## 4. 注释规范
+
+**需要注释：**
+- 函数/类 docstring（说明用途、参数、返回值）
+- 复杂算法/业务逻辑（解释**为什么**这么做）
+- 非直观的代码（如魔法数字、workaround）
+
+**禁止注释：**
+- 解释显而易见的代码行为
+- 每行代码都加注释
 
 ```python
-def some_function():
-    # 循环引用: gateway 层导入 model 层，model 层又需要此类型
-    from gateway.SomeGateway import SomeGateway
-    gateway = SomeGateway()
-    ...
+# ❌ 禁止 - 解释显而易见的内容
+i += 1  # 增加计数
+
+# ✅ 正确 - 解释复杂逻辑
+# 使用滑动窗口避免重复计算，时间复杂度从 O(n^2) 降到 O(n)
+window_sum = sum(nums[:k])
 ```

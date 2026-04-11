@@ -1,4 +1,5 @@
-from hermes.tools.bash import bash, read, write, edit
+from hermes.tools.bash import bash
+from hermes.tools.file import read, write, edit
 
 TOOLS = [bash, read, write, edit]
 

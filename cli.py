@@ -8,8 +8,9 @@ from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
 
-from hermes.agent import HermesAgent
+from hermes.agents import HermesAgent
 from hermes.config import Config
+from hermes.tools.confirm import set_confirm_callback
 
 
 # 自定义主题
@@ -38,6 +39,8 @@ class HermesCLI:
         
         # 注册工具状态回调
         self.agent.set_tool_callback(self._on_tool_event)
+        # 注册危险操作确认回调
+        set_confirm_callback(self._confirm_operation)
     
     def _banner(self) -> RenderableType:
         """生成优美的 ASCII banner"""
@@ -128,21 +131,33 @@ class HermesCLI:
             self.console.print(f"[思考中... 使用 {tool_name} ]", style="dim", end="\r")
         elif event_type == "complete":
             self._current_tool = None
-            # 清除思考状态行
             self.console.print(" " * 50, end="\r")
         elif event_type == "error":
             self._current_tool = None
             error = data.get("error", "未知错误")
             self.console.print(f"[工具错误: {error}]", style="error")
 
+    def _confirm_operation(self, tool_name: str, description: str) -> bool:
+        """询问用户确认危险操作"""
+        # 清除思考状态行
+        self.console.print(" " * 50, end="\r")
+
+        self.console.print(f"[安全确认] 工具 '{tool_name}' 将要执行:", style="error")
+        self.console.print(f"  {description}", style="info")
+
+        try:
+            user_input = input("是否继续? [y/N]: ").strip().lower()
+            return user_input in ("y", "yes")
+        except (KeyboardInterrupt, EOFError):
+            self.console.print()
+            return False
+
     def _think_stream(self, message: str) -> str:
         """调用 agent 思考并流式输出"""
         full_response = ""
         
         try:
-            # 流式输出：使用 Rich Console 直接输出（更稳定）
             for chunk in self.agent.run_stream(message):
-                # 如果有工具正在执行，先清除状态行
                 if self._current_tool:
                     self.console.print(" " * 50, end="\r")
                     self._current_tool = None
@@ -150,7 +165,7 @@ class HermesCLI:
                 full_response += chunk
                 self.console.print(chunk, end="", soft_wrap=True)
             
-            self.console.print()  # 换行
+            self.console.print()
             return full_response
         except Exception as e:
             return f"出错了: {e}"
