@@ -9,6 +9,7 @@ dependencies = [
     "langchain>=1.2.15",
     "langchain-openai>=1.1.12",
     "langgraph>=1.1.6",
+    "orjson>=3.10.0",
     "prompt-toolkit>=3.0.0",
     "python-dotenv>=1.2.2",
     "rich>=14.3.3",

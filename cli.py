@@ -1,12 +1,13 @@
-#!/usr/bin/env python
+import sys
+
+from prompt_toolkit import prompt
+from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console, RenderableType
 from rich.padding import Padding
 from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
-import sys
-from prompt_toolkit import prompt
-from prompt_toolkit.history import InMemoryHistory
+
 from hermes.agent import HermesAgent
 from hermes.config import Config
 
@@ -23,7 +24,7 @@ THEME = Theme({
 
 class HermesCLI:
     """Hermes Code CLI 主类"""
-    
+
     def __init__(self) -> None:
         self.console = Console(theme=THEME)
         self.agent = HermesAgent()
@@ -33,6 +34,10 @@ class HermesCLI:
             "/reset": self._reset,
             "/help": self._help,
         }
+        self._current_tool: str | None = None
+        
+        # 注册工具状态回调
+        self.agent.set_tool_callback(self._on_tool_event)
     
     def _banner(self) -> RenderableType:
         """生成优美的 ASCII banner"""
@@ -73,6 +78,7 @@ class HermesCLI:
     
     def _reset(self) -> bool:
         """重置对话记忆"""
+        self.agent.reset()
         self.console.print("记忆已重置", style="dim")
         return True
     
@@ -113,6 +119,22 @@ class HermesCLI:
             self.console.print()
             return None
     
+    def _on_tool_event(self, event_type: str, data: dict) -> None:
+        """处理工具调用事件"""
+        tool_name = data.get("tool_name", "unknown")
+        
+        if event_type == "start":
+            self._current_tool = tool_name
+            self.console.print(f"[思考中... 使用 {tool_name} ]", style="dim", end="\r")
+        elif event_type == "complete":
+            self._current_tool = None
+            # 清除思考状态行
+            self.console.print(" " * 50, end="\r")
+        elif event_type == "error":
+            self._current_tool = None
+            error = data.get("error", "未知错误")
+            self.console.print(f"[工具错误: {error}]", style="error")
+
     def _think_stream(self, message: str) -> str:
         """调用 agent 思考并流式输出"""
         full_response = ""
@@ -120,6 +142,11 @@ class HermesCLI:
         try:
             # 流式输出：使用 Rich Console 直接输出（更稳定）
             for chunk in self.agent.run_stream(message):
+                # 如果有工具正在执行，先清除状态行
+                if self._current_tool:
+                    self.console.print(" " * 50, end="\r")
+                    self._current_tool = None
+                    
                 full_response += chunk
                 self.console.print(chunk, end="", soft_wrap=True)
             
@@ -149,7 +176,7 @@ class HermesCLI:
                     break
                 continue
             
-            response = self._think_stream(user_input)
+            self._think_stream(user_input)
 
 
 def main() -> None:
