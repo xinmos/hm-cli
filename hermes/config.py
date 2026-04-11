@@ -20,3 +20,11 @@ class Config:
     MAX_OUTPUT_LINES = int(os.getenv("HERMES_MAX_LINES", "500"))
     COMMAND_TIMEOUT = int(os.getenv("HERMES_TIMEOUT", "120"))  # 秒
     STRICT_SANDBOX = os.getenv("HERMES_STRICT", "true").lower() == "true"
+
+    # 上下文压缩配置
+    CONTEXT_COMPRESSION = os.getenv("HERMES_COMPRESSION", "true").lower() == "true"
+    CONTEXT_THRESHOLD = int(os.getenv("HERMES_CONTEXT_THRESHOLD", "30"))  # 触发压缩的消息数
+    CONTEXT_MAX_MESSAGES = int(os.getenv("HERMES_CONTEXT_MAX", "50"))  # 最大保留消息数
+
+    # 定时任务存储路径
+    TASKS_PATH = Path(os.getenv("HERMES_TASKS_PATH", WORKDIR / ".hermes" / "tasks.json"))

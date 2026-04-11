@@ -1,4 +1,3 @@
-"""危险操作确认机制 - 全局回调注册"""
 from typing import Callable, Optional
 
 # 全局确认回调函数

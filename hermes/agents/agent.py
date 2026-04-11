@@ -5,11 +5,12 @@ from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from hermes.config import Config
+from hermes.context import ContextCompressor
 from hermes.tools import TOOLS
 
 
 class HermesAgent:
-    def __init__(self):
+    def __init__(self, enable_compression: bool = True):
         self.tools = TOOLS
         self.model = ChatOpenAI(
             api_key=Config.OPENAI_API_KEY,
@@ -20,6 +21,17 @@ class HermesAgent:
         self._messages = []
         self._tool_callback: Optional[Callable[[str, dict], None]] = None
         self._confirm_callback: Optional[Callable[[str, str], bool]] = None
+        self._compression_callback: Optional[Callable[[int, int], None]] = None
+
+        # 初始化上下文压缩器
+        if enable_compression and Config.CONTEXT_COMPRESSION:
+            self._compressor = ContextCompressor(
+                model=self.model,
+                max_messages=Config.CONTEXT_MAX_MESSAGES,
+                compression_threshold=Config.CONTEXT_THRESHOLD,
+            )
+        else:
+            self._compressor = None
 
     def set_tool_callback(self, callback: Callable[[str, dict], None]) -> None:
         """设置工具调用事件回调
@@ -68,8 +80,42 @@ class HermesAgent:
 
         return final_response.encode("utf-8", errors="ignore").decode("utf-8")
 
+    def set_compression_callback(self, callback: Callable[[int, int], None]) -> None:
+        """设置上下文压缩回调
+
+        callback 接收:
+            - original_count: 压缩前的消息数
+            - compressed_count: 压缩后的消息数
+        """
+        self._compression_callback = callback
+
+    def _maybe_compress(self) -> None:
+        """根据条件自动压缩上下文"""
+        if self._compressor and self._compressor.should_compress(self._messages):
+            original = len(self._messages)
+            self._messages = self._compressor.smart_compress(self._messages)
+            compressed = len(self._messages)
+            if self._compression_callback and original > compressed:
+                self._compression_callback(original, compressed)
+
+    def compress_context(self) -> dict:
+        """手动触发上下文压缩"""
+        if not self._compressor:
+            return {"error": "Compression disabled"}
+        original = len(self._messages)
+        self._messages = self._compressor.smart_compress(self._messages)
+        compressed = len(self._messages)
+        return {
+            "original": original,
+            "compressed": compressed,
+            "reduced": original - compressed,
+        }
+
     def run_stream(self, user_input: str):
         self._messages.append(HumanMessage(content=user_input))
+
+        # 自动压缩上下文
+        self._maybe_compress()
 
         config = {"configurable": {"thread_id": "default_thread"}}
         inputs = {"messages": self._messages}
