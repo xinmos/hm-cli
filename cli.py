@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
@@ -187,8 +188,64 @@ class HermesCLI:
         self.console.print(f"未知命令: {cmd}", style="error")
         return True
     
+    def _print_statusline(self) -> None:
+        """Print status line above the prompt using Rich."""
+        # Get workspace name
+        workspace = Path.cwd().name
+        if workspace == "/":
+            workspace = "root"
+
+        # Get context info
+        msg_count = len(self.agent._messages)
+        max_msgs = Config.CONTEXT_MAX_MESSAGES
+        threshold = Config.CONTEXT_THRESHOLD
+
+        # Calculate percentage
+        pct = min(100, int((msg_count / max_msgs) * 100)) if max_msgs > 0 else 0
+
+        # Determine colors based on usage
+        if pct < 50:
+            pct_style = "green"
+        elif pct < 80:
+            pct_style = "yellow"
+        else:
+            pct_style = "red"
+
+        if msg_count > threshold:
+            ctx_style = "yellow" if msg_count < max_msgs else "red"
+        else:
+            ctx_style = "bright_black"
+
+        # Truncate model name
+        model = Config.MODEL_NAME
+        if len(model) > 18:
+            model = model[:15] + "..."
+
+        # Build status text using Rich
+        text = Text()
+        text.append(" Hermes ", style="bold cyan")
+        text.append("│", style="bright_black")
+        text.append(f" {workspace} ", style="white")
+        text.append("│", style="bright_black")
+        text.append(f" {msg_count}/{max_msgs} ", style=ctx_style)
+        text.append("│", style="bright_black")
+        text.append(f" {model} ", style="magenta")
+
+        # Add progress bar if context is growing
+        if msg_count > 3:
+            bar_width = 8
+            filled = int((pct / 100) * bar_width)
+            filled = min(filled, bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            text.append("│", style="bright_black")
+            text.append(f" {bar} {pct}%", style=pct_style)
+
+        self.console.print(text)
+
     def _ask(self, prompt_text: str) -> str | None:
         try:
+            # Print status line above the prompt
+            self._print_statusline()
             result = prompt(prompt_text, history=self._history)
             sys.stdout.write("\n")
             sys.stdout.flush()
