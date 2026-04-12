@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from prompt_toolkit import prompt
+from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console, RenderableType
 from rich.padding import Padding
@@ -34,7 +35,6 @@ class HermesCLI:
             "/clear": self._clear,
             "/reset": self._reset,
             "/help": self._help,
-            "/skill": self._skill_cmd,
             "/skills": self._skill_cmd,
             "/task": self._task_cmd,
             "/compress": self._compress_cmd,
@@ -45,10 +45,29 @@ class HermesCLI:
         self._scheduler.start()
         self._current_tool: str | None = None
 
+        self.agent.set_system_prompt(self._build_system_prompt())
         self.agent.set_tool_callback(self._on_tool_event)
         set_confirm_callback(self._confirm_operation)
         self.agent.set_compression_callback(self._on_context_compressed)
+        self._completer = self._create_completer()
     
+    def _build_system_prompt(self) -> str:
+        prompt_path = Path(__file__).parent / "hermes" / "prompts" / "system.md"
+        base_prompt = ""
+        if prompt_path.exists():
+            base_prompt = prompt_path.read_text(encoding="utf-8")
+
+        skills = self._skill_registry.list_skills()
+        if not skills:
+            return base_prompt
+
+        skill_section = "\n\n## 可用技能\n\n"
+        for skill in skills:
+            cmd = skill.slash_command or f"{skill.name}"
+            skill_section += f"- {cmd}: {skill.description}\n"
+
+        return base_prompt + skill_section
+
     def _banner(self) -> RenderableType:
         banner_ascii = """
 ╔═══════════════════════════════════════════════════╗
@@ -97,7 +116,7 @@ class HermesCLI:
   /exit         退出程序
   /clear        清屏
   /reset        重置对话记忆
-  /skill        列出可用技能
+  /skills        列出可用技能
   /task         定时任务管理 (add/list/remove)
   /compress     手动压缩上下文
   /help         显示帮助
@@ -189,21 +208,15 @@ class HermesCLI:
         return True
     
     def _print_statusline(self) -> None:
-        """Print status line above the prompt using Rich."""
-        # Get workspace name
         workspace = Path.cwd().name
         if workspace == "/":
             workspace = "root"
 
-        # Get context info
         msg_count = len(self.agent._messages)
         max_msgs = Config.CONTEXT_MAX_MESSAGES
         threshold = Config.CONTEXT_THRESHOLD
 
-        # Calculate percentage
         pct = min(100, int((msg_count / max_msgs) * 100)) if max_msgs > 0 else 0
-
-        # Determine colors based on usage
         if pct < 50:
             pct_style = "green"
         elif pct < 80:
@@ -216,12 +229,10 @@ class HermesCLI:
         else:
             ctx_style = "bright_black"
 
-        # Truncate model name
         model = Config.MODEL_NAME
         if len(model) > 18:
             model = model[:15] + "..."
 
-        # Build status text using Rich
         text = Text()
         text.append(" Hermes ", style="bold cyan")
         text.append("│", style="bright_black")
@@ -242,11 +253,18 @@ class HermesCLI:
 
         self.console.print(text)
 
+    def _create_completer(self) -> WordCompleter:
+        commands = list(self.commands.keys())
+        skills = self._skill_registry.list_skills()
+        for skill in skills:
+            if skill.slash_command:
+                commands.append(skill.slash_command)
+        return WordCompleter(commands, sentence=True, match_middle=True)
+
     def _ask(self, prompt_text: str) -> str | None:
         try:
-            # Print status line above the prompt
             self._print_statusline()
-            result = prompt(prompt_text, history=self._history)
+            result = prompt(prompt_text, history=self._history, completer=self._completer)
             sys.stdout.write("\n")
             sys.stdout.flush()
             return result

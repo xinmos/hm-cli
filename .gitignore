@@ -10,5 +10,6 @@ wheels/
 .venv
 .idea
 .windsurf
+.hermes
 
 .env
