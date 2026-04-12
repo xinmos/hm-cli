@@ -1,7 +1,9 @@
-from typing import Callable, Optional
+from __future__ import annotations
+
+from typing import Any, Callable, Optional
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from hermes.config import Config
@@ -18,12 +20,12 @@ class HermesAgent:
             model=Config.MODEL_NAME
         )
         self.agent = create_agent(self.model, TOOLS)
-        self._messages = []
+        self._messages: list = []
+        self._system_prompt: str = ""
         self._tool_callback: Optional[Callable[[str, dict], None]] = None
         self._confirm_callback: Optional[Callable[[str, str], bool]] = None
         self._compression_callback: Optional[Callable[[int, int], None]] = None
 
-        # 初始化上下文压缩器
         if enable_compression and Config.CONTEXT_COMPRESSION:
             self._compressor = ContextCompressor(
                 model=self.model,
@@ -33,26 +35,21 @@ class HermesAgent:
         else:
             self._compressor = None
 
-    def set_tool_callback(self, callback: Callable[[str, dict], None]) -> None:
-        """设置工具调用事件回调
+    def set_system_prompt(self, prompt: str) -> None:
+        self._system_prompt = prompt
+        for i, msg in enumerate(self._messages):
+            if isinstance(msg, SystemMessage):
+                self._messages[i] = SystemMessage(content=prompt)
+                return
+        self._messages.insert(0, SystemMessage(content=prompt))
 
-        callback 接收:
-            - event_type: "start" | "complete" | "error"
-            - data: {"tool_name": str, "result": Any, "error": str}
-        """
+    def set_tool_callback(self, callback: Callable[[str, dict], None]) -> None:
         self._tool_callback = callback
 
     def set_confirm_callback(self, callback: Callable[[str, str], bool]) -> None:
-        """设置危险命令确认回调
-
-        callback 接收:
-            - tool_name: 工具名称
-            - command: 要执行的命令/操作描述
-        返回: bool - True 表示用户确认执行，False 表示取消
-        """
         self._confirm_callback = callback
 
-    def _notify_tool(self, event_type: str, tool_name: str, result: any = None, error: str = None):
+    def _notify_tool(self, event_type: str, tool_name: str, result: Any = None, error: str = None):
         if self._tool_callback:
             self._tool_callback(event_type, {
                 "tool_name": tool_name,
@@ -81,25 +78,16 @@ class HermesAgent:
         return final_response.encode("utf-8", errors="ignore").decode("utf-8")
 
     def set_compression_callback(self, callback: Callable[[int, int], None]) -> None:
-        """设置上下文压缩回调
-
-        callback 接收:
-            - original_count: 压缩前的消息数
-            - compressed_count: 压缩后的消息数
-        """
         self._compression_callback = callback
 
     def _maybe_compress(self) -> None:
-        """根据条件自动压缩上下文"""
         if self._compressor and self._compressor.should_compress(self._messages):
             original = len(self._messages)
             self._messages = self._compressor.smart_compress(self._messages)
-            compressed = len(self._messages)
-            if self._compression_callback and original > compressed:
-                self._compression_callback(original, compressed)
+            if self._compression_callback and original > len(self._messages):
+                self._compression_callback(original, len(self._messages))
 
     def compress_context(self) -> dict:
-        """手动触发上下文压缩"""
         if not self._compressor:
             return {"error": "Compression disabled"}
         original = len(self._messages)
@@ -113,8 +101,6 @@ class HermesAgent:
 
     def run_stream(self, user_input: str):
         self._messages.append(HumanMessage(content=user_input))
-
-        # 自动压缩上下文
         self._maybe_compress()
 
         config = {"configurable": {"thread_id": "default_thread"}}
@@ -144,4 +130,13 @@ class HermesAgent:
             self._messages.append(AIMessageChunk(content=full_response))
 
     def reset(self) -> None:
+        system_msg = None
+        for msg in self._messages:
+            if isinstance(msg, SystemMessage):
+                system_msg = msg
+                break
         self._messages.clear()
+        if system_msg:
+            self._messages.append(system_msg)
+        elif self._system_prompt:
+            self._messages.append(SystemMessage(content=self._system_prompt))

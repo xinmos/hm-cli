@@ -15,7 +15,6 @@ from hermes.skills import get_registry
 from hermes.tools.confirm import set_confirm_callback
 
 
-# 自定义主题
 THEME = Theme({
     "prompt": Style(color="green", bold=True),
     "banner": Style(color="cyan", bold=True),
@@ -26,8 +25,6 @@ THEME = Theme({
 
 
 class HermesCLI:
-    """Hermes Code CLI 主类"""
-
     def __init__(self) -> None:
         self.console = Console(theme=THEME)
         self.agent = HermesAgent()
@@ -37,6 +34,7 @@ class HermesCLI:
             "/reset": self._reset,
             "/help": self._help,
             "/skill": self._skill_cmd,
+            "/skills": self._skill_cmd,
             "/task": self._task_cmd,
             "/compress": self._compress_cmd,
         }
@@ -46,15 +44,11 @@ class HermesCLI:
         self._scheduler.start()
         self._current_tool: str | None = None
 
-        # 注册工具状态回调
         self.agent.set_tool_callback(self._on_tool_event)
-        # 注册危险操作确认回调
         set_confirm_callback(self._confirm_operation)
-        # 注册上下文压缩回调
         self.agent.set_compression_callback(self._on_context_compressed)
     
     def _banner(self) -> RenderableType:
-        """生成优美的 ASCII banner"""
         banner_ascii = """
 ╔═══════════════════════════════════════════════════╗
 ║                                                   ║
@@ -65,110 +59,137 @@ class HermesCLI:
 ║   ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████║    ║
 ║   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝    ║
 ║                                                   ║
-║              [ AI Coding Assistant ]              ║
+║              [      AI 助理       ]              ║
 ╚═══════════════════════════════════════════════════╝"""
         return Text(banner_ascii, style="cyan bold")
-    
+
     def _config_info(self) -> RenderableType:
-        """显示配置信息"""
         text = Text()
         text.append(f"  Model:  ", style="dim")
         text.append(f"{Config.MODEL_NAME}\n", style="info")
         text.append(f"  Tools:  ", style="dim")
         text.append(f"{len(self.agent.tools)}\n", style="info")
+        skills = self._skill_registry.list_skills()
+        text.append(f"  Skills: ", style="dim")
+        text.append(f"{len(skills)}\n", style="info")
         return Padding(text, (0, 0, 1, 0))
     
+    
     def _show_welcome(self) -> None:
-        """显示欢迎界面"""
         self.console.print(self._banner())
         self.console.print(self._config_info())
         self.console.print("输入 /help 查看命令或直接输入消息\n", style="dim")
     
     def _clear(self) -> bool:
-        """清屏并显示 banner"""
         self.console.clear()
         self._show_welcome()
         return True
     
     def _reset(self) -> bool:
-        """重置对话记忆"""
         self.agent.reset()
         self.console.print("记忆已重置", style="dim")
         return True
     
     def _help(self) -> bool:
-        """显示帮助"""
         help_text = """
 [cyan]可用命令:[/]
   /exit         退出程序
   /clear        清屏
   /reset        重置对话记忆
-  /skill        技能管理 (load/list/unload)
+  /skill        列出可用技能
   /task         定时任务管理 (add/list/remove)
   /compress     手动压缩上下文
   /help         显示帮助
-        """
+
+[cyan]可用技能:[/] 使用 /<skill-name> [参数] 执行"""
         self.console.print(help_text)
+        self._show_available_skills()
         return True
     
     def _load_default_skills(self) -> None:
-        skills_dir = Config.WORKDIR / ".hermes" / "skills"
-        if skills_dir.exists():
-            loaded = self._skill_registry.load_from_directory(str(skills_dir))
-            if loaded:
-                names = [s.name for s in loaded]
-                self.console.print(f"已加载技能: {', '.join(names)}", style="dim")
+        loaded = []
+
+        builtin_dirs = [
+            Config.WORKDIR / ".hermes" / "skills",
+            Config.WORKDIR / "hermes" / "skills",
+        ]
+        for skills_dir in builtin_dirs:
+            if skills_dir.exists():
+                for subdir in skills_dir.iterdir():
+                    if subdir.is_dir():
+                        skill_md = subdir / "SKILL.md"
+                        if skill_md.exists():
+                            try:
+                                skill = self._skill_registry.load_from_file(str(skill_md))
+                                loaded.append(skill)
+                            except Exception as e:
+                                self.console.print(f"加载技能失败 {skill_md}: {e}", style="error")
+                try:
+                    batch = self._skill_registry.load_from_directory(str(skills_dir))
+                    loaded.extend(batch)
+                except Exception as e:
+                    self.console.print(f"加载技能目录失败 {skills_dir}: {e}", style="error")
+
+        user_skills_dir = Config.WORKDIR / "skills"
+        if user_skills_dir.exists():
+            try:
+                batch = self._skill_registry.load_from_directory(str(user_skills_dir))
+                loaded.extend(batch)
+            except Exception as e:
+                self.console.print(f"加载用户技能失败 {user_skills_dir}: {e}", style="error")
+
+    def _show_available_skills(self) -> None:
+        skills = self._skill_registry.list_skills()
+        if not skills:
+            self.console.print("  (暂无可用技能)", style="dim")
+            return
+        for skill in skills:
+            cmd = skill.slash_command or f"/{skill.name}"
+            desc = skill.description[:50] + "..." if len(skill.description) > 50 else skill.description
+            self.console.print(f"  {cmd:<12} - {desc}", style="info")
 
     def _skill_cmd(self) -> bool:
-        """技能管理命令 - 输入 /skill load <path> 或 /skill list"""
-        self.console.print("[cyan]技能管理:[/]")
-        self.console.print("  /skill load <路径>  - 加载技能文件")
-        self.console.print("  /skill list         - 列出已加载技能")
-        self.console.print("  /skill unload <名>  - 卸载技能")
+        self.console.print("[cyan]可用技能:[/]")
+        self._show_available_skills()
+        self.console.print("\n使用方式: /<skill-name> [参数]", style="dim")
+        return True
 
-        try:
-            action = input("操作 (load/list/unload): ").strip().lower()
-            if action == "load":
-                path = input("技能文件路径: ").strip()
-                skill = self._skill_registry.load_from_file(path)
-                self.console.print(f"已加载技能: {skill.name}", style="info")
-            elif action == "list":
-                skills = self._skill_registry.list_skills()
-                if not skills:
-                    self.console.print("没有已加载的技能", style="dim")
-                else:
-                    for s in skills:
-                        self.console.print(f"  - {s.name}: {s.description}", style="info")
-            elif action == "unload":
-                name = input("技能名称: ").strip()
-                if self._skill_registry.unregister(name):
-                    self.console.print(f"已卸载技能: {name}", style="info")
-                else:
-                    self.console.print(f"技能不存在: {name}", style="error")
-            else:
-                self.console.print(f"未知操作: {action}", style="error")
-        except Exception as e:
-            self.console.print(f"操作失败: {e}", style="error")
+    def _run_skill(self, skill, args: str = "") -> bool:
+        if "$ARGUMENTS" in skill.instructions and args:
+            full_prompt = skill.instructions.replace("$ARGUMENTS", args)
+        elif args:
+            full_prompt = f"{skill.instructions}\n\n用户输入: {args}"
+        else:
+            full_prompt = skill.instructions
+
+        self._think_stream(full_prompt)
         return True
 
     def _exit(self) -> bool:
-        """退出程序"""
         self.console.print("再见!", style="dim")
         return False
     
     def _handle_command(self, cmd: str) -> bool:
-        """处理斜杠命令"""
-        handler = self.commands.get(cmd.lower().strip())
-        if handler:
-            return handler()
+        cmd_lower = cmd.lower().strip()
+
+        if cmd_lower in self.commands:
+            return self.commands[cmd_lower]()
+
+        parts = cmd.split(None, 1)
+        slash_cmd = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+
+        if self._skill_registry.is_slash_command(slash_cmd):
+            skill = self._skill_registry.get_by_slash_command(slash_cmd)
+            if skill:
+                return self._run_skill(skill, args)
+
         self.console.print(f"未知命令: {cmd}", style="error")
         return True
     
     def _ask(self, prompt_text: str) -> str | None:
-        """获取用户输入 - 支持方向键和历史记录"""
         try:
             result = prompt(prompt_text, history=self._history)
-            # 强制在输入后换新行，确保后续输出不会覆盖输入
             sys.stdout.write("\n")
             sys.stdout.flush()
             return result
@@ -177,7 +198,6 @@ class HermesCLI:
             return None
     
     def _on_tool_event(self, event_type: str, data: dict) -> None:
-        """处理工具调用事件"""
         tool_name = data.get("tool_name", "unknown")
         
         if event_type == "start":
@@ -192,8 +212,6 @@ class HermesCLI:
             self.console.print(f"[工具错误: {error}]", style="error")
 
     def _confirm_operation(self, tool_name: str, description: str) -> bool:
-        """询问用户确认危险操作"""
-        # 清除思考状态行
         self.console.print(" " * 50, end="\r")
 
         self.console.print(f"[安全确认] 工具 '{tool_name}' 将要执行:", style="error")
@@ -207,14 +225,12 @@ class HermesCLI:
             return False
 
     def _on_context_compressed(self, original: int, compressed: int) -> None:
-        """处理上下文压缩事件"""
         self.console.print(
             f"[上下文压缩] {original} 条消息 → {compressed} 条消息",
             style="dim"
         )
 
     def _task_cmd(self) -> bool:
-        """定时任务管理命令"""
         self.console.print("[cyan]定时任务管理:[/]")
         self.console.print("  add    - 添加任务")
         self.console.print("  list   - 列出任务")
@@ -250,7 +266,6 @@ class HermesCLI:
         return True
 
     def _compress_cmd(self) -> bool:
-        """手动触发上下文压缩"""
         result = self.agent.compress_context()
         if "error" in result:
             self.console.print(f"压缩失败: {result['error']}", style="error")
@@ -263,7 +278,6 @@ class HermesCLI:
         return True
 
     def _think_stream(self, message: str) -> str:
-        """调用 agent 思考并流式输出"""
         full_response = ""
         
         try:
@@ -281,7 +295,6 @@ class HermesCLI:
             return f"出错了: {e}"
     
     def run(self) -> None:
-        """运行 CLI 主循环"""
         self._show_welcome()
         
         prompt_text = "> "
@@ -305,7 +318,6 @@ class HermesCLI:
 
 
 def main() -> None:
-    """入口函数"""
     cli = HermesCLI()
     cli.run()
 

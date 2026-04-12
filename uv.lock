@@ -153,6 +153,7 @@ dependencies = [
     { name = "orjson" },
     { name = "prompt-toolkit" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "rich" },
 ]
 
@@ -166,6 +167,7 @@ requires-dist = [
     { name = "orjson", specifier = ">=3.10.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "rich", specifier = ">=14.3.3" },
 ]
 
