@@ -63,8 +63,9 @@ class HermesCLI:
 
         skill_section = "\n\n## 可用技能\n\n"
         for skill in skills:
-            cmd = skill.slash_command or f"{skill.name}"
-            skill_section += f"- {cmd}: {skill.description}\n"
+            skill_section += f"- {skill.name}: {skill.description}\n"
+
+        skill_section += "\n当需要使用某个 skill 时，先调用 `load_skill` 工具获取完整指令。"
 
         return base_prompt + skill_section
 

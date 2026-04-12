@@ -60,17 +60,45 @@ class SkillRegistry:
             return True
         return cmd.lstrip("/") in self._skills
 
-    def load_from_file(self, path: str) -> Skill:
+    def load_from_file(self, path: str, lazy: bool = True) -> Skill:
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Skill file not found: {path}")
 
-        content = path.read_text(encoding="utf-8")
-        skill = self._parse_skill(content, path.stem)
+        if lazy:
+            skill = self._parse_skill_metadata(path)
+        else:
+            content = path.read_text(encoding="utf-8")
+            skill = self._parse_skill(content, path)
         self.register(skill)
         return skill
 
-    def _parse_skill(self, content: str, default_name: str) -> Skill:
+    def _parse_skill_metadata(self, path: Path) -> Skill:
+        content = path.read_text(encoding="utf-8")
+        frontmatter_match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+
+        if frontmatter_match:
+            meta = yaml.safe_load(frontmatter_match.group(1)) or {}
+        else:
+            meta = {}
+
+        name = meta.get("name", path.stem)
+        description = meta.get("description", "")
+        version = meta.get("version", "1.0.0")
+        slash_command = meta.get("slash_command", "")
+        metadata = {k: v for k, v in meta.items() if k not in ["name", "description", "version", "slash_command"]}
+
+        return Skill(
+            name=name,
+            description=description,
+            version=version,
+            instructions="",
+            slash_command=slash_command or f"/{name}",
+            metadata=metadata,
+            file_path=path,
+        )
+
+    def _parse_skill(self, content: str, path: Path) -> Skill:
         frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
 
         if frontmatter_match:
@@ -80,7 +108,7 @@ class SkillRegistry:
             meta = {}
             instructions = content.strip()
 
-        name = meta.get("name", default_name)
+        name = meta.get("name", path.stem)
         description = meta.get("description", "")
         version = meta.get("version", "1.0.0")
         slash_command = meta.get("slash_command", "")
@@ -93,8 +121,26 @@ class SkillRegistry:
             instructions=instructions,
             slash_command=slash_command or f"/{name}",
             metadata=metadata,
-            file_path=Path(default_name) if not isinstance(default_name, Path) else default_name,
+            file_path=path,
         )
+
+    def load_skill_instructions(self, name: str) -> str | None:
+        skill = self._skills.get(name)
+        if not skill or not skill.file_path:
+            return None
+        if skill.instructions:
+            return skill.instructions
+
+        try:
+            content = skill.file_path.read_text(encoding="utf-8")
+            frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", content, re.DOTALL)
+            if frontmatter_match:
+                skill.instructions = frontmatter_match.group(2).strip()
+            else:
+                skill.instructions = content.strip()
+            return skill.instructions
+        except Exception:
+            return None
 
     def load_from_directory(self, directory: str) -> List[Skill]:
         directory = Path(directory)

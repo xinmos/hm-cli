@@ -37,6 +37,7 @@ class HermesAgent:
 
     def set_system_prompt(self, prompt: str) -> None:
         self._system_prompt = prompt
+        print(self._system_prompt)
         for i, msg in enumerate(self._messages):
             if isinstance(msg, SystemMessage):
                 self._messages[i] = SystemMessage(content=prompt)
