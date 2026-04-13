@@ -20,6 +20,7 @@ class LangChainOpenAIBackend:
             base_url=base_url,
             model=model_name,
             temperature=temperature,
+            streaming=True,
         )
 
     def stream(self, messages: list[Message], tools: list[Any] | None = None) -> Iterable[AgentEvent]:

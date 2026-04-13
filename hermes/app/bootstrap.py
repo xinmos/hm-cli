@@ -88,8 +88,8 @@ class ControlPlaneApp:
             return {"type": "error", "message": f"Unknown command: {cmd}"}
 
     def _handle_message(self, message: str) -> dict[str, Any]:
-        # 返回 chunks 列表，保持与 skill 类型一致，支持流式输出
-        return {"type": "message", "response": list(self.agent.run_stream(message))}
+        # 直接返回 generator，支持真正的流式输出
+        return {"type": "message", "response": self.agent.run_stream(message)}
 
     def _build_skill_prompt(self, instructions: str, args: str) -> str:
         if "$ARGUMENTS" in instructions and args:
