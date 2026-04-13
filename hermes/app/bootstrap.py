@@ -132,10 +132,8 @@ def _build_system_prompt(skill_repo: SkillRepository) -> str:
     if not skills:
         return base_prompt
 
-    skill_section = "\n\n## 可用技能\n\n"
+    skill_section = "\n\n当需要使用某个 skill 时，先调用 `load_skill` 工具获取完整指令。\n## 可用技能\n\n"
     for skill in skills:
         skill_section += f"- {skill.name}: {skill.description}\n"
-
-    skill_section += "\n当需要使用某个 skill 时，先调用 `load_skill` 工具获取完整指令。"
 
     return base_prompt + skill_section

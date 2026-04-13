@@ -12,8 +12,6 @@ from rich.text import Text
 from rich.theme import Theme
 
 from hermes.app.bootstrap import ControlPlaneApp, bootstrap
-from hermes.app.ports import InteractionPort, SkillInfo
-
 
 THEME = Theme({
     "prompt": Style(color="green", bold=True),
