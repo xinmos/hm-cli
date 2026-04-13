@@ -146,7 +146,7 @@ class CLIAdapter:
         self._console.print(text)
 
     def _create_completer(self) -> WordCompleter:
-        commands = ["/exit", "/clear", "/reset", "/help", "/skills", "/task", "/compress"]
+        commands = ["/exit", "/clear", "/reset", "/help", "/skills", "/task", "/compress", "/soul"]
         skills = self._app.skills.list_skills()
         for skill in skills:
             if skill.slash_command:
@@ -173,6 +173,7 @@ class CLIAdapter:
   /skills       列出可用技能
   /task         定时任务管理 (add/list/remove)
   /compress     手动压缩上下文
+  /soul         切换 Agent 身份 (list/<name>)
   /help         显示帮助
 
 [cyan]可用技能:[/] 使用 /<skill-name> [参数] 执行"""
@@ -190,6 +191,13 @@ class CLIAdapter:
             self._console.print(f"  {cmd:<12} - {desc}", style="info")
 
     def _handle_command(self, cmd: str) -> bool:
+        # 处理 /soul 命令
+        if cmd.startswith("/soul"):
+            parts = cmd.split(maxsplit=1)
+            arg = parts[1] if len(parts) > 1 else ""
+            self._handle_soul_command(arg)
+            return True
+
         result = self._app.handle(cmd)
 
         if result["type"] == "control":
@@ -214,13 +222,37 @@ class CLIAdapter:
                 self._console.print(chunk, end="", soft_wrap=True)
             self._console.print()
         elif result["type"] == "message":
-            response = result.get("response", "")
-            self._console.print(response, end="", soft_wrap=True)
+            response = result.get("response", [])
+            for chunk in response:
+                self._console.print(chunk, end="", soft_wrap=True)
             self._console.print()
         elif result["type"] == "error":
             self._console.print(result.get("message", "未知错误"), style="error")
 
         return True
+
+    def _handle_soul_command(self, arg: str) -> None:
+        """处理 /soul 命令"""
+        if not arg or arg == "list":
+            # 列出可用 souls
+            souls = self._app.list_available_souls()
+            current = self._app.soul.name if self._app.soul else "none"
+            self._console.print("[cyan]可用身份:[/]")
+            for soul_name in souls:
+                marker = " →" if soul_name == current else "   "
+                self._console.print(f"{marker} {soul_name}")
+            self._console.print(f"\n当前身份: [cyan]{current}[/]")
+            self._console.print("\n使用 /soul <name> 切换身份")
+        else:
+            # 切换到指定 soul
+            soul = self._app.load_soul(arg)
+            if soul:
+                self._app.set_soul(soul)
+                self._console.print(f"[green]已切换身份: {soul.name}[/]")
+                self._console.print(f"[dim]{soul.persona[:100]}...[/]")
+            else:
+                self._console.print(f"[red]未找到身份: {arg}[/]")
+                self._console.print("使用 /soul list 查看可用身份")
 
     def _task_cmd(self) -> None:
         self._console.print("[cyan]定时任务管理:[/]")
@@ -279,8 +311,9 @@ class CLIAdapter:
             # Handle as message
             result = self._app.handle(user_input)
             if result["type"] == "message":
-                response = result.get("response", "")
-                self._console.print(response, end="", soft_wrap=True)
+                response = result.get("response", [])
+                for chunk in response:
+                    self._console.print(chunk, end="", soft_wrap=True)
                 self._console.print()
 
 
