@@ -1,6 +1,5 @@
 ---
 name: llm-wiki
-slash_command: /wiki
 description: Build and maintain a persistent, interlinked markdown knowledge base. Use when the user wants to create a wiki, ingest sources, query compiled knowledge, lint for consistency, or references their wiki/knowledge base. Handles knowledge accumulation via incremental compilation rather than per-query retrieval.
 allowed-tools: bash(grep:*, find:*, ls:*, cat:*, head:*, tail:*), Read, Write, Edit, Glob, WebSearch, WebFetch
 ---

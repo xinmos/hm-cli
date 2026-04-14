@@ -1,9 +1,7 @@
-from __future__ import annotations
-
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
-from typing import Any, Optional
+from typing import Any, List
 
 import yaml
 
@@ -33,15 +31,6 @@ class SkillRegistry:
             raise ValueError(f"Skill '{skill.name}' already registered")
         self._skills[skill.name] = skill
         self._slash_commands[skill.slash_command] = skill.name
-
-    def unregister(self, name: str) -> bool:
-        if name in self._skills:
-            skill = self._skills[name]
-            del self._skills[name]
-            if skill.slash_command in self._slash_commands:
-                del self._slash_commands[skill.slash_command]
-            return True
-        return False
 
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)
