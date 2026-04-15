@@ -13,6 +13,3 @@ class SkillService:
 
     def list_skills(self) -> list[SkillInfo]:
         return self._repo.list_skills()
-
-    def is_slash_command(self, cmd: str) -> bool:
-        return self._repo.is_slash_command(cmd)
