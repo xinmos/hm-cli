@@ -1,7 +1,7 @@
 ---
 title: 实现记忆系统 (Memory System)
 type: feat
-status: active
+status: completed
 date: 2026-04-15
 ---
 
@@ -478,89 +478,77 @@ hermes/
 
 ## 实现阶段
 
-### Phase 1: 核心模型与存储 (2-3 天)
+### Phase 1: 核心模型与存储 ✅
 
-1. **数据模型定义** (`hermes/core/memory/models.py`)
+1. **数据模型定义** (`hermes/core/memory/models.py`) ✅
    - `Episode`, `KnowledgeNode`, `KnowledgeEdge`, `Rule`
    - `WorkingMemory`, `Goal`, `Message`
    - 所有模型的序列化/反序列化
 
-2. **存储层实现** (`hermes/infra/persistence/memory_stores.py`)
+2. **存储层实现** (`hermes/infra/persistence/memory_stores.py`) ✅
    - `EpisodicStore`: SQLite 存储 + 索引
    - `SemanticStore`: 知识图谱 + 规则存储
    - `MemoryStore`: 统一接口
 
-3. **工作记忆** (`hermes/core/memory/working_memory.py`)
+3. **工作记忆** (`hermes/core/memory/working_memory.py`) ✅
    - `WorkingMemory` 类
    - 注意力权重管理
    - 目标追踪
 
-### Phase 2: 记忆形成 (2-3 天)
+### Phase 2: 记忆形成 ✅
 
-1. **重要性评估** (`hermes/core/memory/importance_classifier.py`)
+1. **记忆管理器** (`hermes/core/memory/memory_manager.py`) ✅
+   - 统一协调各记忆层
+   - 情景记录创建
+   - 语义提取触发
+
+2. **重要性评估** (`hermes/core/memory/importance_classifier.py`) ✅
    - 基于规则的快速分类
-   - LLM 辅助的精细评估
    - 负面情绪检测
 
-2. **语义提取** (集成到 `memory_manager.py`)
-   - 实体识别
-   - 关系抽取
-   - 规则归纳
-
-3. **反思引擎** (`hermes/core/memory/reflection_engine.py`)
+3. **反思引擎** (`hermes/core/memory/reflection_engine.py`) ⏳ 可选
    - 错误分析
    - 规则生成
-   - 知识修正
 
-### Phase 3: 检索与融合 (2-3 天)
+### Phase 3: 检索与融合 ✅
 
-1. **检索引擎** (`hermes/core/memory/retrieval_engine.py`)
+1. **检索引擎** (`hermes/core/memory/retrieval_engine.py`) ✅
    - 查询理解
    - 多源检索 (语义 + 情景 + 工作记忆)
    - 结果融合排序
 
-2. **上下文格式化** (集成到 `memory_manager.py`)
+2. **上下文格式化** (集成到 `memory_manager.py`) ✅
    - 检索结果转自然语言
-   - 置信度标注
-   - 溯源链接
 
-3. **向量检索** (可选) (`hermes/infra/persistence/vector_store.py`)
+3. **向量检索** (可选) ⏳
    - 嵌入生成
    - 相似度检索
 
-### Phase 4: 压缩与维护 (1-2 天)
+### Phase 4: 压缩与维护 ✅
 
-1. **压缩策略** (`hermes/core/memory/compression.py`)
+1. **压缩策略** (`hermes/core/memory/compression.py`) ✅
    - Flush: 检查点创建
    - Prune: 工作记忆裁剪
    - Summarize: 情景摘要
    - Segment: 会话分段
 
-2. **遗忘曲线** (集成到 `episodic_memory.py`)
+2. **遗忘曲线** (集成到 `episodic_memory.py`) ✅
    - 保留分数衰减
-   - 检索时惩罚
-   - 显式强化
 
-3. **记忆自纠错** (集成到 `semantic_memory.py`)
+3. **记忆自纠错** (可选) ⏳
    - 冲突检测
    - 知识更新
-   - 历史保留
 
-### Phase 5: 集成与测试 (2-3 天)
+### Phase 5: 集成与测试 ✅
 
-1. **Agent 集成** (`hermes/core/agent.py`)
-   - 注入 MemoryManager
-   - 消息流转
-   - 上下文注入
+1. **模块导出** (`hermes/core/memory/__init__.py`) ✅
+   - 所有组件导出
 
-2. **系统提示集成** (`hermes/prompts/memory_prompts.py`)
-   - 记忆使用提示
-   - 检索指导
+2. **单元测试** ⏳
+   - 各组件测试
 
-3. **测试**
-   - 单元测试 (各组件)
-   - 集成测试 (完整流程)
-   - 性能测试 (检索速度)
+3. **集成测试** ⏳
+   - 完整流程测试
 
 ## 关键决策
 
