@@ -1,10 +1,11 @@
+from enum import Enum
 from typing import Any
 
 from langchain_core.tools import tool as langchain_tool
 
 from hermes.app.ports import InteractionPort, SkillRepository
 from hermes.app.settings import Settings
-from hermes.security import SecurityManager
+from hermes.security import CommandSafety, SecurityManager
 
 
 class LangChainToolCatalog:
@@ -34,12 +35,18 @@ class LangChainToolCatalog:
         @langchain_tool
         def bash(command: str) -> str:
             """Execute a bash command safely."""
-            if self._interaction_port:
-                if not self._interaction_port.confirm("bash", command):
-                    return "Command rejected by user"
+            # 使用分级安全检查
+            safety_level = self._security.check_command_safety(command)
 
-            if not self._security.is_command_allowed(command):
-                return f"Command not allowed: {command}"
+            if safety_level == CommandSafety.REJECTED:
+                return f"Command not allowed (high risk): {command}"
+
+            if safety_level == CommandSafety.NEEDS_CONFIRMATION:
+                if self._interaction_port:
+                    if not self._interaction_port.confirm("bash", command):
+                        return "Command rejected by user"
+                else:
+                    return "Command requires confirmation but no interaction port available"
 
             import subprocess
 
@@ -70,6 +77,7 @@ class LangChainToolCatalog:
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):
                 return f"Access denied: {file_path}"
+            # 只读操作自动批准，不需要确认
             try:
                 return path.read_text(encoding="utf-8")
             except Exception as e:
@@ -78,9 +86,13 @@ class LangChainToolCatalog:
         @langchain_tool
         def write(file_path: str, content: str) -> str:
             """Write content to a file."""
+            # 写文件需要确认
             if self._interaction_port:
-                if not self._interaction_port.confirm("write", f"{file_path}: {content[:100]}..."):
+                preview = f"{file_path}: {content[:100]}..." if len(content) > 100 else f"{file_path}: {content}"
+                if not self._interaction_port.confirm("write", preview):
                     return "Write operation rejected by user"
+            else:
+                return "Write operation requires confirmation but no interaction port available"
 
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):
@@ -95,9 +107,13 @@ class LangChainToolCatalog:
         @langchain_tool
         def edit(file_path: str, old_string: str, new_string: str) -> str:
             """Edit a file by replacing old_string with new_string."""
+            # 编辑文件需要确认
             if self._interaction_port:
-                if not self._interaction_port.confirm("edit", f"{file_path}: replace '{old_string[:50]}...'"):
+                preview = f"{file_path}: replace '{old_string[:50]}...'" if len(old_string) > 50 else f"{file_path}: replace '{old_string}'"
+                if not self._interaction_port.confirm("edit", preview):
                     return "Edit operation rejected by user"
+            else:
+                return "Edit operation requires confirmation but no interaction port available"
 
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):

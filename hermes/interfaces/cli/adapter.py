@@ -11,6 +11,7 @@ from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
 
+from hermes.app import InteractionPort
 from hermes.app.bootstrap import ControlPlaneApp, bootstrap
 
 THEME = Theme({
@@ -22,7 +23,7 @@ THEME = Theme({
 })
 
 
-class RichInteractionPort:
+class RichInteractionPort(InteractionPort):
     def __init__(self, console: Console):
         self._console = console
 
