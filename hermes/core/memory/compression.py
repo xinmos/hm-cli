@@ -11,8 +11,6 @@ from hermes.core.memory.models import CompressionStrategy, Episode, WorkingMemor
 
 @dataclass
 class CompressionResult:
-    """压缩结果"""
-
     strategy: CompressionStrategy
     success: bool
     items_affected: int
@@ -32,14 +30,11 @@ class CompressionResult:
 
 
 class CompressionEngine:
-    """压缩引擎"""
-
     def __init__(self, db_path: Path, working_memory: WorkingMemory) -> None:
         self._db_path = db_path
         self._wm = working_memory
 
     async def compress(self, strategy: CompressionStrategy) -> CompressionResult:
-        """执行压缩"""
         if strategy == CompressionStrategy.FLUSH:
             return await self._flush()
         elif strategy == CompressionStrategy.PRUNE:
@@ -61,14 +56,12 @@ class CompressionEngine:
         checkpoint_id = str(uuid.uuid4())[:8]
         timestamp = datetime.now()
 
-        # 保存工作记忆快照
         snapshot = {
             "checkpoint_id": checkpoint_id,
             "timestamp": timestamp.isoformat(),
             "working_memory": self._wm.to_dict(),
         }
 
-        # 保存到数据库
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
                 """
@@ -106,11 +99,9 @@ class CompressionEngine:
                 details={"reason": "Message count below threshold"},
             )
 
-        # 保留系统消息
         system_msgs = [m for m in self._wm.messages if m.role == "system"]
         other_msgs = [m for m in self._wm.messages if m.role != "system"]
 
-        # 保留最近的消息
         keep_count = min(20, len(other_msgs))
         kept_msgs = other_msgs[-keep_count:]
 

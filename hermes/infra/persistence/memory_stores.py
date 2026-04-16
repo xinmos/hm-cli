@@ -102,6 +102,7 @@ class EpisodicStore:
     ) -> list[Episode]:
         """按时间范围查询"""
         with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
             if session_id:
                 rows = conn.execute(
                     """
@@ -126,6 +127,7 @@ class EpisodicStore:
     def query_by_session(self, session_id: str) -> list[Episode]:
         """按会话查询"""
         with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
                 SELECT * FROM episodes WHERE session_id = ? ORDER BY timestamp

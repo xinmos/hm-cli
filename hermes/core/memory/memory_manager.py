@@ -187,16 +187,31 @@ class MemoryManager:
         context = RetrievedContext()
 
         # 1. 从情景记忆中检索
-        # 查找包含查询词的情景
+        # 提取查询关键词（去掉疑问词）
+        query_lower = query.lower()
+        # 提取有意义的关键词（去掉常见疑问词和助词）
+        stop_words = {"我", "你", "是", "的", "了", "在", "有", "什么", "怎么", "如何", "吗", "呢", "请", "问"}
+        keywords = [w for w in query_lower.split() if w not in stop_words and len(w) >= 2]
+
+        # 如果没有有效关键词，尝试提取所有中文字符
+        if not keywords:
+            import re
+
+            keywords = re.findall(r"[\u4e00-\u9fa5]{2,}", query_lower)
+
         recent_episodes = self._store.episodic.query_by_time(
             datetime.now() - timedelta(days=30),
             datetime.now(),
         )
 
         for ep in recent_episodes:
-            if query.lower() in ep.summary.lower():
-                context.episodes.append(ep)
-                context.relevance_scores[ep.id] = 0.8
+            summary_lower = ep.summary.lower()
+            # 检查是否有任何关键词匹配
+            for keyword in keywords:
+                if keyword in summary_lower:
+                    context.episodes.append(ep)
+                    context.relevance_scores[ep.id] = 0.8
+                    break
 
         # 2. 从工作记忆中获取高注意力内容
         for key, weight in self._wm.attention_weights.items():

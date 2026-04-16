@@ -16,7 +16,6 @@ class WorkingMemoryManager:
         return self._wm
 
     def update_attention(self, key: str, weight: float) -> None:
-        """基于查询更新注意力权重"""
         self._wm.update_attention(key, max(0.0, min(1.0, weight)))
 
     def get_context_window(self, max_tokens: int = 4000) -> list[Message]:
@@ -35,15 +34,12 @@ class WorkingMemoryManager:
         return self._wm.get_context_window(max_messages)
 
     def add_goal(self, description: str, priority: int = 5, parent_id: str | None = None) -> str:
-        """添加新目标"""
         return self._wm.add_goal(description, priority, parent_id)
 
     def complete_goal(self, goal_id: str) -> bool:
-        """完成目标"""
         return self._wm.complete_goal(goal_id)
 
     def fail_goal(self, goal_id: str) -> bool:
-        """标记目标失败"""
         for goal in self._wm.active_goals:
             if goal.id == goal_id and goal.is_active():
                 goal.fail()
@@ -52,42 +48,34 @@ class WorkingMemoryManager:
         return False
 
     def get_active_goals(self) -> list[Goal]:
-        """获取活跃目标"""
         return self._wm.get_active_goals()
 
     def get_goal_by_id(self, goal_id: str) -> Goal | None:
-        """通过ID获取目标"""
         for goal in self._wm.active_goals:
             if goal.id == goal_id:
                 return goal
         return None
 
     def start_tool_execution(self, tool_name: str, arguments: dict[str, Any]) -> ToolExecution:
-        """开始工具执行"""
         return self._wm.start_tool_execution(tool_name, arguments)
 
     def add_message(self, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
-        """添加消息"""
         self._wm.add_message(role, content, metadata)
 
     def get_recent_messages(self, count: int = 10) -> list[Message]:
-        """获取最近的消息"""
         if not self._wm.messages:
             return []
         return self._wm.messages[-count:]
 
     def clear_messages(self) -> None:
-        """清空消息列表（保留系统消息）"""
         system_msgs = [m for m in self._wm.messages if m.role == "system"]
         self._wm.messages = system_msgs
         self._wm.touch()
 
     def clear_tool_chain(self) -> None:
-        """清空工具执行链"""
         self._wm.clear_tool_chain()
 
     def reset_goals(self) -> None:
-        """重置所有目标（标记为取消）"""
         for goal in self._wm.active_goals:
             if goal.is_active():
                 goal.status = GoalStatus.CANCELLED
@@ -95,15 +83,12 @@ class WorkingMemoryManager:
         self._wm.touch()
 
     def get_stats(self) -> dict[str, Any]:
-        """获取工作记忆统计"""
         active_goals = len(self._wm.get_active_goals())
         total_goals = len(self._wm.active_goals)
         message_count = len(self._wm.messages)
         tool_count = len(self._wm.tool_chain)
 
-        # 计算会话持续时间
         session_duration = datetime.now() - self._wm.session_start
-
         return {
             "session_id": self._wm.session_id,
             "active_goals": active_goals,
@@ -115,9 +100,7 @@ class WorkingMemoryManager:
         }
 
     def export_state(self) -> dict[str, Any]:
-        """导出工作记忆状态"""
         return self._wm.to_dict()
 
     def import_state(self, data: dict[str, Any]) -> None:
-        """导入工作记忆状态"""
         self._wm = WorkingMemory.from_dict(data)

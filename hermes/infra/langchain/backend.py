@@ -4,10 +4,10 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
-from hermes.app.ports import AgentEvent, Message
+from hermes.app.ports import AgentEvent, Message, AgentBackend
 
 
-class LangChainOpenAIBackend:
+class LangChainOpenAIBackend(AgentBackend):
     def __init__(
         self,
         api_key: str,

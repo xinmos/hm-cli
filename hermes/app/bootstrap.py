@@ -4,6 +4,7 @@ from typing import Any
 from hermes.app.ports import (
     AgentBackend,
     InteractionPort,
+    Message,
     SchedulerDriver,
     SkillRepository,
     TaskStore,
@@ -11,6 +12,8 @@ from hermes.app.ports import (
 )
 from hermes.app.settings import Settings
 from hermes.core.agent import AgentSession
+from hermes.core.memory.memory_manager import MemoryManager
+from hermes.core.memory.models import MemoryConfig
 from hermes.core.soul import SoulIdentity, SoulLoader
 from hermes.infra.langchain.backend import LangChainOpenAIBackend
 from hermes.infra.langchain.tools import LangChainToolCatalog
@@ -31,6 +34,7 @@ class ControlPlaneApp:
         soul_loader: SoulLoader,
         soul: SoulIdentity | None = None,
         interaction_port: InteractionPort | None = None,
+        memory_manager: MemoryManager | None = None,
     ):
         self.settings = settings
         self.agent = agent_session
@@ -39,6 +43,7 @@ class ControlPlaneApp:
         self.soul_loader = soul_loader
         self.soul = soul
         self.interaction = interaction_port
+        self.memory = memory_manager
         self._base_system_prompt = _build_system_prompt_base(skill_repo=None)
 
     def set_soul(self, soul: SoulIdentity) -> None:
@@ -88,8 +93,7 @@ class ControlPlaneApp:
             return {"type": "error", "message": f"Unknown command: {cmd}"}
 
     def _handle_message(self, message: str) -> dict[str, Any]:
-        # 直接返回 generator，支持真正的流式输出
-        return {"type": "message", "response": self.agent.run_stream(message)}
+        return {"type": "message", "response": self._run_with_memory(message)}
 
     def _build_skill_prompt(self, instructions: str, args: str) -> str:
         if "$ARGUMENTS" in instructions and args:
@@ -97,6 +101,54 @@ class ControlPlaneApp:
         elif args:
             return f"{instructions}\n\n用户输入: {args}"
         return instructions
+
+    def _run_with_memory(self, user_input: str):
+        import asyncio
+
+        memory_context = ""
+        if self.memory:
+            try:
+                context = asyncio.run(
+                    self.memory.retrieve_relevant_context(
+                        query=user_input,
+                        max_tokens=2000,
+                    )
+                )
+                if not context.is_empty():
+                    memory_context = context.formatted_text
+                    if self.interaction:
+                        self.interaction.notify_tool_start("memory")
+                        self.interaction.notify_tool_complete("memory")
+            except Exception:
+                pass
+
+        messages = self.agent.get_messages()
+        if memory_context and messages:
+            enhanced_messages = []
+            for msg in messages:
+                enhanced_messages.append(msg)
+                if msg.role == "system" and len(enhanced_messages) == 1:
+                    enhanced_messages.append(
+                        Message(role="system", content=f"[相关记忆]\n{memory_context}")
+                    )
+            messages = enhanced_messages
+
+        full_response = ""
+        for chunk in self.agent.run_stream_with_messages(user_input, messages):
+            full_response += chunk
+            yield chunk
+
+        if self.memory:
+            try:
+                asyncio.run(
+                    self.memory.process_interaction(
+                        user_input=user_input,
+                        agent_response=full_response,
+                    )
+                )
+            except Exception:
+                # 记忆保存失败不影响主流程
+                pass
 
 
 def bootstrap(
@@ -152,6 +204,14 @@ def bootstrap(
     task_service = TaskService(task_store, scheduler_driver)
     task_service.load_persistent_tasks()
 
+    # 初始化记忆系统
+    memory_config = MemoryConfig(
+        db_path=str(settings.workdir / ".hermes" / "memory.db"),
+        importance_threshold=3,
+        max_working_messages=50,
+    )
+    memory_manager = MemoryManager(config=memory_config)
+
     return ControlPlaneApp(
         settings=settings,
         agent_session=agent_session,
@@ -160,6 +220,7 @@ def bootstrap(
         soul_loader=soul_loader,
         soul=current_soul,
         interaction_port=interaction_port,
+        memory_manager=memory_manager,
     )
 
 

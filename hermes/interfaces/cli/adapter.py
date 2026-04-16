@@ -226,10 +226,47 @@ class CLIAdapter:
             for chunk in response:
                 self._console.print(chunk, end="", soft_wrap=True)
             self._console.print()
+        elif result["type"] == "compress":
+            self._handle_compress()
         elif result["type"] == "error":
             self._console.print(result.get("message", "未知错误"), style="error")
 
         return True
+
+    def _handle_compress(self) -> None:
+        """处理 /compress 命令 - 压缩记忆"""
+        if not self._app.memory:
+            self._console.print("[yellow]记忆系统未启用[/yellow]")
+            return
+
+        import asyncio
+        from hermes.core.memory.models import CompressionStrategy
+
+        self._console.print("[cyan]选择压缩策略:[/]")
+        self._console.print("  1. flush    - 创建检查点")
+        self._console.print("  2. prune    - 裁剪低权重内容")
+        self._console.print("  3. summarize- 对旧记录生成摘要")
+        self._console.print("  4. segment  - 创建新的会话段")
+
+        try:
+            choice = input("选择 (1-4): ").strip()
+            strategy_map = {
+                "1": CompressionStrategy.FLUSH,
+                "2": CompressionStrategy.PRUNE,
+                "3": CompressionStrategy.SUMMARIZE,
+                "4": CompressionStrategy.SEGMENT,
+            }
+
+            strategy = strategy_map.get(choice)
+            if not strategy:
+                self._console.print("[red]无效选择[/red]")
+                return
+
+            result = asyncio.run(self._app.memory.compress_memory(strategy))
+            self._console.print(f"[green]压缩完成: {result}[/green]")
+
+        except Exception as e:
+            self._console.print(f"[red]压缩失败: {e}[/red]")
 
     def _handle_soul_command(self, arg: str) -> None:
         """处理 /soul 命令"""
