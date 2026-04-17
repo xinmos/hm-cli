@@ -53,6 +53,14 @@ class SkillRepository(Protocol):
         """Check if command is a registered slash command"""
         ...
 
+    def get_active_skill(self) -> SkillInfo | None:
+        """Get the currently active skill, if any.
+
+        Returns the skill that is currently controlling the agent's behavior,
+        or None if no skill is active.
+        """
+        ...
+
 
 @dataclass
 class TaskInfo:

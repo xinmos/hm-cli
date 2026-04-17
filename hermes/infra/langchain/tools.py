@@ -1,10 +1,10 @@
-from enum import Enum
 from typing import Any
 
 from langchain_core.tools import tool as langchain_tool
 
 from hermes.app.ports import InteractionPort, SkillRepository
 from hermes.app.settings import Settings
+from hermes.core.skill_permissions import SkillToolPermissionChecker
 from hermes.security import CommandSafety, SecurityManager
 
 
@@ -31,45 +31,68 @@ class LangChainToolCatalog:
                 return tool
         return None
 
+    def _check_command_safety(self, command: str) -> str | None:
+        safety_level = self._security.check_command_safety(command)
+
+        if safety_level == CommandSafety.REJECTED:
+            return f"Command not allowed (high risk): {command}"
+
+        if safety_level == CommandSafety.NEEDS_CONFIRMATION:
+            if self._interaction_port:
+                if not self._interaction_port.confirm("bash", command):
+                    return "Command rejected by user"
+            else:
+                return "Command requires confirmation but no interaction port available"
+
+        return None
+
+    def _execute_bash(self, command: str) -> str:
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=self._settings.command_timeout,
+                cwd=self._settings.workdir,
+            )
+            output = result.stdout + result.stderr
+            lines = output.splitlines()
+            if len(lines) > self._settings.max_output_lines:
+                output = "\n".join(lines[: self._settings.max_output_lines]) + "\n... (truncated)"
+            if len(output) > self._settings.max_output_size:
+                output = output[: self._settings.max_output_size] + "\n... (truncated)"
+            return output
+        except subprocess.TimeoutExpired:
+            return f"Command timed out after {self._settings.command_timeout} seconds"
+        except Exception as e:
+            return f"Error: {e}"
+
     def _build_tools(self) -> None:
         @langchain_tool
         def bash(command: str) -> str:
             """Execute a bash command safely."""
-            # 使用分级安全检查
-            safety_level = self._security.check_command_safety(command)
-
-            if safety_level == CommandSafety.REJECTED:
-                return f"Command not allowed (high risk): {command}"
-
-            if safety_level == CommandSafety.NEEDS_CONFIRMATION:
-                if self._interaction_port:
-                    if not self._interaction_port.confirm("bash", command):
-                        return "Command rejected by user"
+            # 首先检查当前激活的 skill 是否允许这个命令
+            active_skill = self._skill_repo.get_active_skill() if hasattr(self._skill_repo, 'get_active_skill') else None
+            if active_skill:
+                checker = SkillToolPermissionChecker(active_skill)
+                if checker.is_allowed("Bash", command):
+                    # Skill 允许此命令，自动批准，跳过所有安全检查
+                    pass  # 直接执行
                 else:
-                    return "Command requires confirmation but no interaction port available"
+                    # Skill 不允许此命令，走正常安全检查流程
+                    error = self._check_command_safety(command)
+                    if error:
+                        return error
+            else:
+                # 没有激活的 skill，走正常安全检查流程
+                error = self._check_command_safety(command)
+                if error:
+                    return error
 
-            import subprocess
-
-            try:
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._settings.command_timeout,
-                    cwd=self._settings.workdir,
-                )
-                output = result.stdout + result.stderr
-                lines = output.splitlines()
-                if len(lines) > self._settings.max_output_lines:
-                    output = "\n".join(lines[:self._settings.max_output_lines]) + "\n... (truncated)"
-                if len(output) > self._settings.max_output_size:
-                    output = output[:self._settings.max_output_size] + "\n... (truncated)"
-                return output
-            except subprocess.TimeoutExpired:
-                return f"Command timed out after {self._settings.command_timeout} seconds"
-            except Exception as e:
-                return f"Error: {e}"
+            return self._execute_bash(command)
 
         @langchain_tool
         def read(file_path: str) -> str:
