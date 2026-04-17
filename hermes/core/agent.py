@@ -36,7 +36,18 @@ class AgentSession:
     def run_stream(self, user_input: str) -> Iterable[str]:
         self._messages.append(Message(role="user", content=user_input))
 
-        events = self._backend.stream(self._messages, self._tools)
+        yield from self._execute_stream(self._messages)
+
+    def run_stream_with_messages(self, user_input: str, messages: list[Message]) -> Iterable[str]:
+        msgs = list(messages)
+        msgs.append(Message(role="user", content=user_input))
+
+        yield from self._execute_stream(msgs)
+
+        self._messages = list(msgs)
+
+    def _execute_stream(self, messages: list[Message]) -> Iterable[str]:
+        events = self._backend.stream(messages, self._tools)
 
         full_response = ""
         for event in events:
@@ -62,7 +73,11 @@ class AgentSession:
                     yield content
 
         if full_response:
-            self._messages.append(Message(role="assistant", content=full_response))
+            messages.append(Message(role="assistant", content=full_response))
+
+    def get_messages(self) -> list[Message]:
+        """获取当前消息列表的副本"""
+        return list(self._messages)
 
     def reset(self) -> None:
         system_msg: Message | None = None
@@ -78,9 +93,3 @@ class AgentSession:
 
     def get_message_count(self) -> int:
         return len(self._messages)
-
-    def get_messages(self) -> list[Message]:
-        return list(self._messages)
-
-    def set_messages(self, messages: list[Message]) -> None:
-        self._messages = list(messages)

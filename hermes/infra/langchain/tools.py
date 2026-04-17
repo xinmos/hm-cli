@@ -4,7 +4,8 @@ from langchain_core.tools import tool as langchain_tool
 
 from hermes.app.ports import InteractionPort, SkillRepository
 from hermes.app.settings import Settings
-from hermes.security import SecurityManager
+from hermes.core.skill_permissions import SkillToolPermissionChecker
+from hermes.security import CommandSafety, SecurityManager
 
 
 class LangChainToolCatalog:
@@ -30,39 +31,68 @@ class LangChainToolCatalog:
                 return tool
         return None
 
+    def _check_command_safety(self, command: str) -> str | None:
+        safety_level = self._security.check_command_safety(command)
+
+        if safety_level == CommandSafety.REJECTED:
+            return f"Command not allowed (high risk): {command}"
+
+        if safety_level == CommandSafety.NEEDS_CONFIRMATION:
+            if self._interaction_port:
+                if not self._interaction_port.confirm("bash", command):
+                    return "Command rejected by user"
+            else:
+                return "Command requires confirmation but no interaction port available"
+
+        return None
+
+    def _execute_bash(self, command: str) -> str:
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=self._settings.command_timeout,
+                cwd=self._settings.workdir,
+            )
+            output = result.stdout + result.stderr
+            lines = output.splitlines()
+            if len(lines) > self._settings.max_output_lines:
+                output = "\n".join(lines[: self._settings.max_output_lines]) + "\n... (truncated)"
+            if len(output) > self._settings.max_output_size:
+                output = output[: self._settings.max_output_size] + "\n... (truncated)"
+            return output
+        except subprocess.TimeoutExpired:
+            return f"Command timed out after {self._settings.command_timeout} seconds"
+        except Exception as e:
+            return f"Error: {e}"
+
     def _build_tools(self) -> None:
         @langchain_tool
         def bash(command: str) -> str:
             """Execute a bash command safely."""
-            if self._interaction_port:
-                if not self._interaction_port.confirm("bash", command):
-                    return "Command rejected by user"
+            # 首先检查当前激活的 skill 是否允许这个命令
+            active_skill = self._skill_repo.get_active_skill() if hasattr(self._skill_repo, 'get_active_skill') else None
+            if active_skill:
+                checker = SkillToolPermissionChecker(active_skill)
+                if checker.is_allowed("Bash", command):
+                    # Skill 允许此命令，自动批准，跳过所有安全检查
+                    pass  # 直接执行
+                else:
+                    # Skill 不允许此命令，走正常安全检查流程
+                    error = self._check_command_safety(command)
+                    if error:
+                        return error
+            else:
+                # 没有激活的 skill，走正常安全检查流程
+                error = self._check_command_safety(command)
+                if error:
+                    return error
 
-            if not self._security.is_command_allowed(command):
-                return f"Command not allowed: {command}"
-
-            import subprocess
-
-            try:
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._settings.command_timeout,
-                    cwd=self._settings.workdir,
-                )
-                output = result.stdout + result.stderr
-                lines = output.splitlines()
-                if len(lines) > self._settings.max_output_lines:
-                    output = "\n".join(lines[:self._settings.max_output_lines]) + "\n... (truncated)"
-                if len(output) > self._settings.max_output_size:
-                    output = output[:self._settings.max_output_size] + "\n... (truncated)"
-                return output
-            except subprocess.TimeoutExpired:
-                return f"Command timed out after {self._settings.command_timeout} seconds"
-            except Exception as e:
-                return f"Error: {e}"
+            return self._execute_bash(command)
 
         @langchain_tool
         def read(file_path: str) -> str:
@@ -70,6 +100,7 @@ class LangChainToolCatalog:
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):
                 return f"Access denied: {file_path}"
+            # 只读操作自动批准，不需要确认
             try:
                 return path.read_text(encoding="utf-8")
             except Exception as e:
@@ -78,9 +109,13 @@ class LangChainToolCatalog:
         @langchain_tool
         def write(file_path: str, content: str) -> str:
             """Write content to a file."""
+            # 写文件需要确认
             if self._interaction_port:
-                if not self._interaction_port.confirm("write", f"{file_path}: {content[:100]}..."):
+                preview = f"{file_path}: {content[:100]}..." if len(content) > 100 else f"{file_path}: {content}"
+                if not self._interaction_port.confirm("write", preview):
                     return "Write operation rejected by user"
+            else:
+                return "Write operation requires confirmation but no interaction port available"
 
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):
@@ -95,9 +130,13 @@ class LangChainToolCatalog:
         @langchain_tool
         def edit(file_path: str, old_string: str, new_string: str) -> str:
             """Edit a file by replacing old_string with new_string."""
+            # 编辑文件需要确认
             if self._interaction_port:
-                if not self._interaction_port.confirm("edit", f"{file_path}: replace '{old_string[:50]}...'"):
+                preview = f"{file_path}: replace '{old_string[:50]}...'" if len(old_string) > 50 else f"{file_path}: replace '{old_string}'"
+                if not self._interaction_port.confirm("edit", preview):
                     return "Edit operation rejected by user"
+            else:
+                return "Edit operation requires confirmation but no interaction port available"
 
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):

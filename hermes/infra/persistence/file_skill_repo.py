@@ -11,6 +11,7 @@ class FileSkillRepository:
         self._workdir = workdir
         self._skills: dict[str, SkillInfo] = {}
         self._slash_commands: dict[str, str] = {}
+        self._active_skill: SkillInfo | None = None
         self._load_default_skills()
 
     def get(self, name: str) -> SkillInfo | None:
@@ -92,3 +93,26 @@ class FileSkillRepository:
     def _register(self, skill: SkillInfo) -> None:
         self._skills[skill.name] = skill
         self._slash_commands[skill.slash_command] = skill.name
+
+    def get_active_skill(self) -> SkillInfo | None:
+        """Get the currently active skill."""
+        return self._active_skill
+
+    def set_active_skill(self, skill_name: str | None) -> bool:
+        """Set the active skill by name.
+
+        Args:
+            skill_name: Name of the skill to activate, or None to clear
+
+        Returns:
+            True if successful, False if skill not found
+        """
+        if skill_name is None:
+            self._active_skill = None
+            return True
+
+        skill = self._skills.get(skill_name)
+        if skill:
+            self._active_skill = skill
+            return True
+        return False
