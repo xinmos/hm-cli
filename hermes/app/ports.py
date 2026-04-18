@@ -93,11 +93,11 @@ class ToolCatalog(Protocol):
 
 
 class InteractionPort(Protocol):
-    def confirm(self, tool_name: str, description: str) -> bool:
+    def confirm(self, tool_name: str, description: str, tool_display: str = "") -> bool:
         """Ask user to confirm dangerous operation"""
         ...
 
-    def notify_tool_start(self, tool_name: str) -> None:
+    def notify_tool_start(self, tool_name: str, tool_display: str = "") -> None:
         """Notify that tool execution started"""
         ...
 

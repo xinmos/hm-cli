@@ -39,12 +39,17 @@ class LangChainToolCatalog:
 
         if safety_level == CommandSafety.NEEDS_CONFIRMATION:
             if self._interaction_port:
-                if not self._interaction_port.confirm("bash", command):
+                display = f"Bash({command[:40]}...)" if len(command) > 40 else f"Bash({command})"
+                if not self._interaction_port.confirm("bash", command, display):
                     return "Command rejected by user"
             else:
                 return "Command requires confirmation but no interaction port available"
 
         return None
+
+    def _show_tool(self, display: str) -> None:
+        if self._interaction_port:
+            self._interaction_port.notify_tool_start("", display)
 
     def _execute_bash(self, command: str) -> str:
         import subprocess
@@ -74,33 +79,35 @@ class LangChainToolCatalog:
         @langchain_tool
         def bash(command: str) -> str:
             """Execute a bash command safely."""
-            # 首先检查当前激活的 skill 是否允许这个命令
+            display = f"Bash({command[:40]}...)" if len(command) > 40 else f"Bash({command})"
+
             active_skill = self._skill_repo.get_active_skill() if hasattr(self._skill_repo, 'get_active_skill') else None
             if active_skill:
                 checker = SkillToolPermissionChecker(active_skill)
                 if checker.is_allowed("Bash", command):
-                    # Skill 允许此命令，自动批准，跳过所有安全检查
-                    pass  # 直接执行
+                    self._show_tool(display)
                 else:
-                    # Skill 不允许此命令，走正常安全检查流程
                     error = self._check_command_safety(command)
                     if error:
                         return error
+                    self._show_tool(display)
             else:
-                # 没有激活的 skill，走正常安全检查流程
                 error = self._check_command_safety(command)
                 if error:
                     return error
+                self._show_tool(display)
 
             return self._execute_bash(command)
 
         @langchain_tool
         def read(file_path: str) -> str:
-            """Read the contents of a file."""
+            """Read contents of a file."""
+            filename = file_path.split("/")[-1]
+            self._show_tool(f"Read({filename})")
+
             path = self._settings.workdir / file_path
             if not self._security.is_path_allowed(path):
                 return f"Access denied: {file_path}"
-            # 只读操作自动批准，不需要确认
             try:
                 return path.read_text(encoding="utf-8")
             except Exception as e:
@@ -109,10 +116,12 @@ class LangChainToolCatalog:
         @langchain_tool
         def write(file_path: str, content: str) -> str:
             """Write content to a file."""
-            # 写文件需要确认
+            filename = file_path.split("/")[-1]
+            display = f"Write({filename})"
+
             if self._interaction_port:
-                preview = f"{file_path}: {content[:100]}..." if len(content) > 100 else f"{file_path}: {content}"
-                if not self._interaction_port.confirm("write", preview):
+                preview = f"{content[:100]}..." if len(content) > 100 else content
+                if not self._interaction_port.confirm("write", preview, display):
                     return "Write operation rejected by user"
             else:
                 return "Write operation requires confirmation but no interaction port available"
@@ -130,10 +139,12 @@ class LangChainToolCatalog:
         @langchain_tool
         def edit(file_path: str, old_string: str, new_string: str) -> str:
             """Edit a file by replacing old_string with new_string."""
-            # 编辑文件需要确认
+            filename = file_path.split("/")[-1]
+            display = f"Edit({filename})"
+
             if self._interaction_port:
-                preview = f"{file_path}: replace '{old_string[:50]}...'" if len(old_string) > 50 else f"{file_path}: replace '{old_string}'"
-                if not self._interaction_port.confirm("edit", preview):
+                preview = f"replace: {old_string[:50]}..." if len(old_string) > 50 else f"replace: {old_string}"
+                if not self._interaction_port.confirm("edit", preview, display):
                     return "Edit operation rejected by user"
             else:
                 return "Edit operation requires confirmation but no interaction port available"
