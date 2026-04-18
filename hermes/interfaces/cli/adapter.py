@@ -27,31 +27,37 @@ class RichInteractionPort(InteractionPort):
     def __init__(self, console: Console):
         self._console = console
 
-    def confirm(self, tool_name: str, description: str) -> bool:
-        self._console.print(" " * 50, end="\r")
-        self._console.print(f"[安全确认] 工具 '{tool_name}' 将要执行:", style="error")
-        self._console.print(f"  {description}", style="info")
+    def confirm(self, tool_name: str, description: str, tool_display: str = "") -> bool:
+        if tool_display:
+            self._console.print(f"● {tool_display}", style="dim")
+        else:
+            self._console.print(f"● {tool_name}: {description[:60]}", style="dim")
 
         try:
-            user_input = input("是否继续? [y/N]: ").strip().lower()
-            return user_input in ("y", "yes")
+            user_input = input("  [y/N]: ").strip().lower()
+            if user_input not in ("y", "yes"):
+                self._console.print("  ✗ 已取消", style="error")
+                return False
+            return True
         except (KeyboardInterrupt, EOFError):
-            self._console.print()
+            self._console.print("  ✗ 已取消", style="error")
             return False
 
-    def notify_tool_start(self, tool_name: str) -> None:
-        self._console.print(f"[思考中... 使用 {tool_name} ]", style="dim", end="\r")
+    def notify_tool_start(self, tool_name: str, tool_display: str = "") -> None:
+        if tool_display:
+            self._console.print(f"● {tool_display}", style="dim")
+        elif tool_name:
+            self._console.print(f"● {tool_name}", style="dim")
 
     def notify_tool_complete(self, tool_name: str, result: Any = None) -> None:
-        self._console.print(" " * 50, end="\r")
+        pass
 
     def notify_tool_error(self, tool_name: str, error: str) -> None:
-        self._console.print(" " * 50, end="\r")
-        self._console.print(f"[工具错误: {error}]", style="error")
+        self._console.print(f"✗ {tool_name}: {error}", style="error")
 
     def on_context_compressed(self, original: int, compressed: int) -> None:
         self._console.print(
-            f"[上下文压缩] {original} 条消息 → {compressed} 条消息",
+            f"[上下文压缩] {original} 条消息 ● {compressed} 条消息",
             style="dim"
         )
 
@@ -102,47 +108,53 @@ class CLIAdapter:
         self._console.print("输入 /help 查看命令或直接输入消息\n", style="dim")
 
     def _print_statusline(self) -> None:
-        workspace = Path.cwd().name
-        if workspace == "/":
-            workspace = "root"
-
-        msg_count = self._app.agent.get_message_count()
-        max_msgs = self._app.settings.context_max_messages
-        threshold = self._app.settings.context_threshold
-
-        pct = min(100, int((msg_count / max_msgs) * 100)) if max_msgs > 0 else 0
-        if pct < 50:
-            pct_style = "green"
-        elif pct < 80:
-            pct_style = "yellow"
-        else:
-            pct_style = "red"
-
-        if msg_count > threshold:
-            ctx_style = "yellow" if msg_count < max_msgs else "red"
-        else:
-            ctx_style = "bright_black"
+        # Get git branch name
+        git_branch = ""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=Path.cwd()
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                git_branch = result.stdout.strip()
+        except Exception:
+            pass
 
         model = self._app.settings.model_name
-        if len(model) > 18:
-            model = model[:15] + "..."
+        if len(model) > 24:
+            model = model[:21] + "..."
+
+        # Get actual token count
+        used_tokens = self._app.agent.get_token_count()
+        context_size = self._app.settings.context_window  # 从配置读取，默认 256K tokens
+
+        pct = min(100, int((used_tokens / context_size) * 100))
+
+        # Format used tokens (K) with one decimal place (binary: 1024)
+        used_k = used_tokens / 1024
+        total_k = context_size / 1024
 
         text = Text()
-        text.append(" Hermes ", style="bold cyan")
+        text.append(" hermes ", style="bold cyan")
         text.append("│", style="bright_black")
-        text.append(f" {workspace} ", style="white")
-        text.append("│", style="bright_black")
-        text.append(f" {msg_count}/{max_msgs} ", style=ctx_style)
+        if git_branch:
+            text.append(f" {git_branch} ", style="white")
+        else:
+            text.append(f" {Path.cwd().name} ", style="white")
         text.append("│", style="bright_black")
         text.append(f" {model} ", style="magenta")
+        text.append("│", style="bright_black")
 
-        if msg_count > 3:
-            bar_width = 8
-            filled = int((pct / 100) * bar_width)
-            filled = min(filled, bar_width)
-            bar = "█" * filled + "░" * (bar_width - filled)
-            text.append("│", style="bright_black")
-            text.append(f" {bar} {pct}%", style=pct_style)
+        # Progress bar
+        bar_width = 20
+        filled = int((pct / 100) * bar_width)
+        bar = "░" * filled + "░" * (bar_width - filled)
+        text.append(f" ({used_k:.1f}k/{total_k:.0f}k) ", style="dim")
+        text.append(f"{bar} ", style="dim")
+        text.append(f"{pct}%", style="dim")
 
         self._console.print(text)
 
@@ -277,7 +289,7 @@ class CLIAdapter:
             current = self._app.soul.name if self._app.soul else "none"
             self._console.print("[cyan]可用身份:[/]")
             for soul_name in souls:
-                marker = " →" if soul_name == current else "   "
+                marker = " ●" if soul_name == current else "   "
                 self._console.print(f"{marker} {soul_name}")
             self._console.print(f"\n当前身份: [cyan]{current}[/]")
             self._console.print("\n使用 /soul <name> 切换身份")

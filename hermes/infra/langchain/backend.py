@@ -1,7 +1,7 @@
 from typing import Any, Iterable
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage, ToolMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
 from hermes.app.ports import AgentEvent, Message, AgentBackend
@@ -21,7 +21,9 @@ class LangChainOpenAIBackend(AgentBackend):
             model=model_name,
             temperature=temperature,
             streaming=True,
+            stream_usage=True
         )
+        self._last_token_usage = 0
 
     def stream(self, messages: list[Message], tools: list[Any] | None = None) -> Iterable[AgentEvent]:
         lc_messages = self._to_langchain_messages(messages)
@@ -32,11 +34,6 @@ class LangChainOpenAIBackend(AgentBackend):
             inputs = {"messages": lc_messages}
 
             for msg, metadata in agent.stream(inputs, config=config, stream_mode="messages"):
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    for tool_call in msg.tool_calls:
-                        tool_name = tool_call.get("name", "unknown")
-                        yield AgentEvent(event_type="tool_start", data={"tool_name": tool_name})
-
                 if isinstance(msg, ToolMessage):
                     yield AgentEvent(
                         event_type="tool_complete",
@@ -47,15 +44,35 @@ class LangChainOpenAIBackend(AgentBackend):
                     content = msg.content
                     if content:
                         yield AgentEvent(event_type="content", data={"content": content})
+
+                    # Track token usage from usage_metadata (stream_usage=True)
+                    if hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                        if isinstance(msg.usage_metadata, dict):
+                            total = msg.usage_metadata.get("total_tokens")
+                        else:
+                            total = getattr(msg.usage_metadata, "total_tokens", None)
+                        if total and total != self._last_token_usage:
+                            delta = total - self._last_token_usage
+                            self._last_token_usage = total
+                            yield AgentEvent(event_type="token_usage", data={"tokens": delta})
         else:
             for chunk in self._model.stream(lc_messages):
                 content = chunk.content
                 if content:
                     yield AgentEvent(event_type="content", data={"content": content})
 
-    def _to_langchain_messages(self, messages: list[Message]) -> list:
-        from langchain_core.messages import AIMessage
+                # Track token usage from response_metadata
+                if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+                    if isinstance(chunk.usage_metadata, dict):
+                        total = chunk.usage_metadata.get("total_tokens")
+                    else:
+                        total = getattr(chunk.usage_metadata, "total_tokens", None)
+                    if total and total != self._last_token_usage:
+                        delta = total - self._last_token_usage
+                        self._last_token_usage = total
+                        yield AgentEvent(event_type="token_usage", data={"tokens": delta})
 
+    def _to_langchain_messages(self, messages: list[Message]) -> list:
         result = []
         for msg in messages:
             if msg.role == "system":
@@ -65,3 +82,55 @@ class LangChainOpenAIBackend(AgentBackend):
             elif msg.role == "assistant":
                 result.append(AIMessage(content=msg.content))
         return result
+
+    def _format_tool_display(self, tool_name: str, args: dict) -> str:
+        """Format tool call for display in a concise way"""
+        if not args:
+            return tool_name
+
+        # Handle special tools
+        if tool_name == "Bash":
+            cmd = args.get("command", "")
+            # Truncate long commands
+            if len(cmd) > 40:
+                cmd = cmd[:37] + "..."
+            return f"Bash({cmd})"
+        elif tool_name == "Read":
+            path = args.get("file_path", "")
+            # Get only filename for brevity
+            if "/" in path:
+                path = path.split("/")[-1]
+            return f"Read({path})"
+        elif tool_name == "Write":
+            path = args.get("file_path", "")
+            if "/" in path:
+                path = path.split("/")[-1]
+            return f"Write({path})"
+        elif tool_name == "Edit":
+            path = args.get("file_path", "")
+            if "/" in path:
+                path = path.split("/")[-1]
+            return f"Edit({path})"
+        elif tool_name == "WebFetch":
+            url = args.get("url", "")
+            # Shorten URLs
+            if len(url) > 30:
+                url = url[:27] + "..."
+            return f"WebFetch({url})"
+
+        # Generic formatting for other tools
+        args_str = ""
+        for k, v in args.items():
+            if k == "file_path" or k == "path":
+                if "/" in str(v):
+                    v = str(v).split("/")[-1]
+            if args_str:
+                args_str += f", {k}={v}"
+            else:
+                args_str = f"{k}={v}"
+
+            if len(f"{tool_name}({args_str})") > 50:
+                args_str += ", ..."
+                break
+
+        return f"{tool_name}({args_str})"

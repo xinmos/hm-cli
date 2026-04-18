@@ -15,6 +15,7 @@ class AgentSession:
         self._interaction_port = interaction_port
         self._messages: list[Message] = []
         self._tools: list[Any] = []
+        self._total_tokens = 0
 
         if system_prompt:
             self._messages.append(Message(role="system", content=system_prompt))
@@ -35,7 +36,6 @@ class AgentSession:
 
     def run_stream(self, user_input: str) -> Iterable[str]:
         self._messages.append(Message(role="user", content=user_input))
-
         yield from self._execute_stream(self._messages)
 
     def run_stream_with_messages(self, user_input: str, messages: list[Message]) -> Iterable[str]:
@@ -53,7 +53,11 @@ class AgentSession:
         for event in events:
             if event.event_type == "tool_start":
                 if self._interaction_port:
-                    self._interaction_port.notify_tool_start(event.data.get("tool_name", "unknown"))
+                    tool_display = event.data.get("tool_display", "")
+                    self._interaction_port.notify_tool_start(
+                        event.data.get("tool_name", "unknown"),
+                        tool_display
+                    )
             elif event.event_type == "tool_complete":
                 if self._interaction_port:
                     self._interaction_port.notify_tool_complete(
@@ -71,6 +75,10 @@ class AgentSession:
                 if content:
                     full_response += content
                     yield content
+            elif event.event_type == "token_usage":
+                tokens = event.data.get("tokens", 0)
+                if tokens:
+                    self._total_tokens += tokens
 
         if full_response:
             messages.append(Message(role="assistant", content=full_response))
@@ -90,6 +98,30 @@ class AgentSession:
             self._messages.append(system_msg)
         elif self._system_prompt:
             self._messages.append(Message(role="system", content=self._system_prompt))
+        self._total_tokens = 0
 
     def get_message_count(self) -> int:
         return len(self._messages)
+
+    def get_token_count(self) -> int:
+        # Return actual tracked token usage from backend
+        return self._total_tokens
+
+    def reset_token_count(self) -> None:
+        self._total_tokens = 0
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Roughly estimate tokens from text length.
+        English: ~4 chars per token, Chinese: ~1-2 chars per token.
+        We use a weighted average.
+        """
+        if not text:
+            return 0
+
+        # Count Chinese characters
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        # Count non-Chinese characters
+        other_chars = len(text) - chinese_chars
+
+        # Chinese: ~1.5 chars per token, Other: ~4 chars per token
+        return int(chinese_chars / 1.5 + other_chars / 4)

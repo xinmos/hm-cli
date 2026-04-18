@@ -21,6 +21,7 @@ class Settings:
     context_threshold: int
     context_max_messages: int
     tasks_path: Path
+    context_window: int
 
     @classmethod
     def from_env_and_args(
@@ -49,6 +50,7 @@ class Settings:
             context_threshold=int(os.getenv("HERMES_CONTEXT_THRESHOLD", "30")),
             context_max_messages=int(os.getenv("HERMES_CONTEXT_MAX", "50")),
             tasks_path=Path(os.getenv("HERMES_TASKS_PATH", workdir / ".hermes" / "tasks.json")),
+            context_window=int(os.getenv("CONTEXT_WINDOW", "256")) * 1024,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -66,4 +68,5 @@ class Settings:
             "context_threshold": self.context_threshold,
             "context_max_messages": self.context_max_messages,
             "tasks_path": str(self.tasks_path),
+            "context_window": self.context_window,
         }
