@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Puzzle, Bot, Settings } from "lucide-react";
+import { Plus, Search, Puzzle, Bot, Settings, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SettingsPanel } from "@/components/Settings/SettingsPanel";
 import type { Chat } from "@/app/page";
 
 interface SidebarProps {
@@ -24,7 +25,8 @@ export function Sidebar({
   onSelectChat,
   onNewChat,
 }: SidebarProps) {
-  const [activeSection, setActiveSection] = useState<"chat" | "search" | "plugins" | "automation">("chat");
+  const [activeSection, setActiveSection] = useState<"chat" | "search" | "plugins" | "automation" | "settings">("chat");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const groupedChats = chats.reduce((groups, chat) => {
     const date = new Date(chat.updated_at);
@@ -61,6 +63,17 @@ export function Sidebar({
       >
         {/* Tools Menu - VERTICAL COLUMN with icons and text */}
         <div className="flex flex-col p-2 shrink-0">
+          <Button
+            variant="ghost"
+            className={cn(
+              "justify-start gap-3 h-10 px-3 mb-0.5",
+              activeSection === "chat" && "bg-white shadow-sm"
+            )}
+            onClick={() => setActiveSection("chat")}
+          >
+            <MessageSquare className="h-4 w-4" />
+            对话
+          </Button>
           <Button
             variant="ghost"
             className={cn(
@@ -157,13 +170,20 @@ export function Sidebar({
           </Button>
           <Button
             variant="ghost"
-            className="w-full justify-start gap-3 h-10 px-3"
+            className={cn(
+              "w-full justify-start gap-3 h-10 px-3",
+              isSettingsOpen && "bg-white shadow-sm"
+            )}
+            onClick={() => setIsSettingsOpen(true)}
           >
             <Settings className="h-4 w-4" />
             设置
           </Button>
         </div>
       </aside>
+
+      {/* Settings Panel */}
+      <SettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </>
   );
 }

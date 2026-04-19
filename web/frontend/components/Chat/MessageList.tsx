@@ -4,6 +4,7 @@ import { User, Bot, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ToolCallDisplay, type ToolCall } from "./ToolCallDisplay";
 import type { Message } from "@/app/page";
 
 interface MessageListProps {
@@ -66,21 +67,18 @@ function MessageItem({ message }: { message: Message }) {
 
           {/* Tool calls if any */}
           {message.tool_calls && message.tool_calls.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {message.tool_calls.map((tool, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md text-sm"
-                >
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {tool.name}
-                  </span>
-                  <span className="text-muted-foreground truncate">
-                    {JSON.stringify(tool.args)}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <ToolCallDisplay
+              toolCalls={message.tool_calls.map((tool: any, idx: number) => ({
+                id: tool.id || `tool-${idx}`,
+                name: tool.name || tool.function?.name || "unknown",
+                args: tool.args || tool.function?.arguments || {},
+                status: tool.status || "success",
+                result: tool.result,
+                error: tool.error,
+                startTime: tool.startTime,
+                endTime: tool.endTime,
+              }))}
+            />
           )}
         </div>
       </div>
