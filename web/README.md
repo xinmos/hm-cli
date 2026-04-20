@@ -59,8 +59,9 @@ npm install
 ### 2. 启动后端
 
 ```bash
-cd /Users/xinqiangxiong/codes/hm-cli/web/backend
-uv run uvicorn main:app --reload --port 8000
+cd /Users/xinqiangxiong/codes/hm-cli
+uv sync --extra web
+uv run python -m uvicorn web.backend.main:app --reload --port 8000 --host 0.0.0.0
 ```
 
 ### 3. 启动前端
@@ -73,6 +74,36 @@ npm run dev
 ### 4. 访问
 
 打开 http://localhost:3000
+
+### 5. 日志目录
+
+开发日志统一写入：
+
+```bash
+/Users/xinqiangxiong/codes/hm-cli/.hermes/logs/
+```
+
+常用文件：
+
+```bash
+.hermes/logs/web-backend.log
+.hermes/logs/web-frontend.log
+```
+
+### 6. Web 数据目录
+
+Web 会话与聊天数据统一写入：
+
+```bash
+/Users/xinqiangxiong/codes/hm-cli/.hermes/web/
+```
+
+其中包括：
+
+```bash
+.hermes/web/chats.json
+.hermes/web/messages/*.jsonl
+```
 
 ## API 文档
 

@@ -1,6 +1,9 @@
-from fastapi import APIRouter
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from typing import List
+
+from web.backend.app_state import WebServiceContainer
 
 router = APIRouter()
 
@@ -13,28 +16,11 @@ class ModelResponse(BaseModel):
     is_available: bool
 
 
-@router.get("", response_model=List[ModelResponse])
-async def list_models():
-    return [
-        {
-            "id": "doubao-seed-2.0",
-            "name": "Doubao-Seed-2.0",
-            "provider": "bytedance",
-            "context_size": 128000,
-            "is_available": True,
-        },
-        {
-            "id": "gpt-4",
-            "name": "GPT-4",
-            "provider": "openai",
-            "context_size": 128000,
-            "is_available": True,
-        },
-        {
-            "id": "gpt-3.5-turbo",
-            "name": "GPT-3.5 Turbo",
-            "provider": "openai",
-            "context_size": 16384,
-            "is_available": True,
-        },
-    ]
+def _services(request: Request) -> WebServiceContainer:
+    return request.app.state.services
+
+
+@router.get("", response_model=list[ModelResponse])
+async def list_models(request: Request) -> list[ModelResponse]:
+    models = _services(request).model_catalog.list_models()
+    return [ModelResponse(**model) for model in models]

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Protocol
 
@@ -72,6 +74,25 @@ class TaskInfo:
     enabled: bool
 
 
+@dataclass
+class ChatSummary:
+    id: str
+    title: str
+    project_id: str | None
+    created_at: str
+    updated_at: str
+    message_count: int
+
+
+@dataclass
+class ChatMessageRecord:
+    id: str
+    role: str
+    content: str
+    created_at: str
+    tool_calls: list[Any] | None = None
+
+
 class TaskStore(Protocol):
     def load_all(self) -> list[TaskInfo]:
         """Load all tasks from storage"""
@@ -79,6 +100,28 @@ class TaskStore(Protocol):
 
     def save_all(self, tasks: list[TaskInfo]) -> None:
         """Save all tasks to storage"""
+        ...
+
+
+class ChatStore(Protocol):
+    def list_chats(self) -> list[ChatSummary]:
+        """Return chat summaries sorted by most recent first."""
+        ...
+
+    def create_chat(self, title: str, project_id: str | None = None) -> ChatSummary:
+        """Create and persist a new chat."""
+        ...
+
+    def list_messages(self, chat_id: str) -> list[ChatMessageRecord]:
+        """Return all messages for a chat."""
+        ...
+
+    def append_message(self, chat_id: str, message: ChatMessageRecord) -> None:
+        """Append a single message to a chat."""
+        ...
+
+    def delete_chat(self, chat_id: str) -> None:
+        """Delete a chat and all of its messages."""
         ...
 
 

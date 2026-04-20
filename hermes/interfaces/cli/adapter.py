@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,7 +14,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from hermes.app import InteractionPort
-from hermes.app.bootstrap import ControlPlaneApp, bootstrap
+from hermes.app.bootstrap import ControlPlaneApp, assemble_control_plane
 
 THEME = Theme({
     "prompt": Style(color="green", bold=True),
@@ -369,9 +371,13 @@ class CLIAdapter:
 
 def main() -> None:
     interaction_port = RichInteractionPort(Console(theme=THEME))
-    app = bootstrap(interaction_port=interaction_port)
+    app, runtime = assemble_control_plane(interaction_port=interaction_port)
+    runtime.start()
     cli = CLIAdapter(app)
-    cli.run()
+    try:
+        cli.run()
+    finally:
+        runtime.stop()
 
 
 if __name__ == "__main__":

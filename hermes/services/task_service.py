@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
@@ -10,6 +12,7 @@ from hermes.app.ports import SchedulerDriver, TaskInfo, TaskStore
 class ScheduledTask:
     info: TaskInfo
     callback: Callable[[], None] = field(default=lambda: None)
+    last_run: str | None = None
 
 
 class TaskService:
@@ -99,7 +102,7 @@ class TaskService:
         if not scheduled or not scheduled.info.enabled:
             return
 
-        scheduled.info.last_run = datetime.now().isoformat()
+        scheduled.last_run = datetime.now().isoformat()
         try:
             scheduled.callback()
         except Exception as e:

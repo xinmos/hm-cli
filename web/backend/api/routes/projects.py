@@ -1,8 +1,11 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
-from typing import List, Optional
+from __future__ import annotations
+
 from datetime import datetime
-import uuid
+
+from fastapi import APIRouter, Request
+from pydantic import BaseModel
+
+from web.backend.app_state import WebServiceContainer
 
 router = APIRouter()
 
@@ -15,28 +18,17 @@ class ProjectResponse(BaseModel):
     chat_count: int
 
 
-projects_db = []
+def _services(request: Request) -> WebServiceContainer:
+    return request.app.state.services
 
 
-@router.get("", response_model=List[ProjectResponse])
-async def list_projects():
-    return [
-        {
-            "id": "hm-cli",
-            "name": "hm-cli",
-            "path": "/Users/xinqiangxiong/codes/hm-cli",
-            "created_at": datetime.now(),
-            "chat_count": 2,
-        }
-    ]
+@router.get("", response_model=list[ProjectResponse])
+async def list_projects(request: Request) -> list[ProjectResponse]:
+    projects = _services(request).project_service.list_projects()
+    return [ProjectResponse(**project) for project in projects]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str):
-    return {
-        "id": project_id,
-        "name": project_id,
-        "path": f"/path/to/{project_id}",
-        "created_at": datetime.now(),
-        "chat_count": 0,
-    }
+async def get_project(project_id: str, request: Request) -> ProjectResponse:
+    project = _services(request).project_service.get_project(project_id)
+    return ProjectResponse(**project)

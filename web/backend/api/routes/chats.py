@@ -1,23 +1,24 @@
-from fastapi import APIRouter, HTTPException
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
-import uuid
+
+from web.backend.app_state import WebServiceContainer
 
 router = APIRouter()
 
 
 class ChatCreate(BaseModel):
-    title: Optional[str] = "New Chat"
-    project_id: Optional[str] = None
+    title: str | None = None
+    project_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     id: str
     title: str
-    project_id: Optional[str]
-    created_at: datetime
-    updated_at: datetime
+    project_id: str | None
+    created_at: str
+    updated_at: str
     message_count: int
 
 
@@ -25,55 +26,33 @@ class MessageResponse(BaseModel):
     id: str
     role: str
     content: str
-    created_at: datetime
-    tool_calls: Optional[list] = None
+    created_at: str
+    tool_calls: list | None = None
 
 
-chats_db = {}
-messages_db = {}
+def _services(request: Request) -> WebServiceContainer:
+    return request.app.state.services
 
 
-@router.get("", response_model=List[ChatResponse])
-async def list_chats():
-    return list(chats_db.values())
+@router.get("/chats", response_model=list[ChatResponse])
+async def get_chats(request: Request) -> list[ChatResponse]:
+    chats = _services(request).chat_service.list_chats()
+    return [ChatResponse(**chat.__dict__) for chat in chats]
 
 
-@router.post("", response_model=ChatResponse)
-async def create_chat(chat: ChatCreate):
-    chat_id = str(uuid.uuid4())
-    now = datetime.now()
-    new_chat = {
-        "id": chat_id,
-        "title": chat.title,
-        "project_id": chat.project_id,
-        "created_at": now,
-        "updated_at": now,
-        "message_count": 0,
-    }
-    chats_db[chat_id] = new_chat
-    messages_db[chat_id] = []
-    return new_chat
+@router.post("/chats", response_model=ChatResponse)
+async def create_chat(chat: ChatCreate, request: Request) -> ChatResponse:
+    created = _services(request).chat_service.create_chat(chat.title, chat.project_id)
+    return ChatResponse(**created.__dict__)
 
 
-@router.get("/{chat_id}", response_model=ChatResponse)
-async def get_chat(chat_id: str):
-    if chat_id not in chats_db:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    return chats_db[chat_id]
+@router.get("/chats/{chat_id}/messages", response_model=list[MessageResponse])
+async def get_messages(chat_id: str, request: Request) -> list[MessageResponse]:
+    messages = _services(request).chat_service.list_messages(chat_id)
+    return [MessageResponse(**message.__dict__) for message in messages]
 
 
-@router.delete("/{chat_id}")
-async def delete_chat(chat_id: str):
-    if chat_id not in chats_db:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    del chats_db[chat_id]
-    if chat_id in messages_db:
-        del messages_db[chat_id]
-    return {"status": "deleted"}
-
-
-@router.get("/{chat_id}/messages", response_model=List[MessageResponse])
-async def get_messages(chat_id: str):
-    if chat_id not in messages_db:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    return messages_db.get(chat_id, [])
+@router.delete("/chats/{chat_id}")
+async def delete_chat(chat_id: str, request: Request) -> dict[str, str]:
+    _services(request).chat_service.delete_chat(chat_id)
+    return {"status": "ok"}

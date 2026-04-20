@@ -18,8 +18,12 @@ function check_port() {
 # 获取项目根目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+LOG_DIR="$PROJECT_ROOT/.hermes/logs"
+BACKEND_LOG="$LOG_DIR/web-backend.log"
+FRONTEND_LOG="$LOG_DIR/web-frontend.log"
 
 cd "$PROJECT_ROOT"
+mkdir -p "$LOG_DIR"
 
 # 启动后端
 echo "📦 启动后端服务..."
@@ -29,9 +33,9 @@ if check_port 8000; then
     echo "⚠️ 端口 8000 已被占用，可能是后端已在运行"
 else
     # 使用 nohup 在后台运行
-    nohup bash -c "source $PROJECT_ROOT/.venv/bin/activate && uvicorn main:app --reload --port 8000 --host 0.0.0.0" > "$PROJECT_ROOT/web/backend.log" 2>&1 &
+    nohup bash -c "cd '$PROJECT_ROOT' && ./.venv/bin/python -m uvicorn web.backend.main:app --reload --port 8000 --host 0.0.0.0" > "$BACKEND_LOG" 2>&1 &
     echo "✅ 后端服务已启动 (PID: $!)"
-    echo "📄 日志文件: web/backend.log"
+    echo "📄 日志文件: .hermes/logs/web-backend.log"
 fi
 
 cd "$PROJECT_ROOT"
@@ -44,7 +48,7 @@ sleep 3
 if check_port 8000; then
     echo "✅ 后端服务运行正常 (http://localhost:8000)"
 else
-    echo "❌ 后端服务启动失败，请检查日志: web/backend.log"
+    echo "❌ 后端服务启动失败，请检查日志: .hermes/logs/web-backend.log"
 fi
 
 echo ""
@@ -60,9 +64,9 @@ else
     npm install
 
     echo "🚀 启动 Next.js 开发服务器..."
-    nohup npm run dev > "$PROJECT_ROOT/web/frontend.log" 2>&1 &
+    nohup npm run dev > "$FRONTEND_LOG" 2>&1 &
     echo "✅ 前端服务已启动 (PID: $!)"
-    echo "📄 日志文件: web/frontend.log"
+    echo "📄 日志文件: .hermes/logs/web-frontend.log"
 fi
 
 cd "$PROJECT_ROOT"
@@ -75,7 +79,7 @@ sleep 5
 if check_port 3000; then
     echo "✅ 前端服务运行正常 (http://localhost:3000)"
 else
-    echo "❌ 前端服务启动失败，请检查日志: web/frontend.log"
+    echo "❌ 前端服务启动失败，请检查日志: .hermes/logs/web-frontend.log"
 fi
 
 echo ""
@@ -89,8 +93,8 @@ echo "   后端 API: http://localhost:8000"
 echo "   API 文档: http://localhost:8000/docs"
 echo ""
 echo "📋 常用命令:"
-echo "   查看后端日志: tail -f web/backend.log"
-echo "   查看前端日志: tail -f web/frontend.log"
-echo "   停止所有服务: pkill -f 'uvicorn main:app' && pkill -f 'next dev'"
+echo "   查看后端日志: tail -f .hermes/logs/web-backend.log"
+echo "   查看前端日志: tail -f .hermes/logs/web-frontend.log"
+echo "   停止所有服务: pkill -f 'python -m uvicorn web.backend.main:app' && pkill -f 'next dev'"
 echo ""
 echo "═══════════════════════════════════════════"
