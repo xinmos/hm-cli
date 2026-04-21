@@ -57,3 +57,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .markdown-body > *:first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body > *:last-child {
+    margin-bottom: 0;
+  }
+
+  .markdown-body hr {
+    @apply my-6 border-border;
+  }
+
+  .markdown-body strong {
+    @apply font-semibold text-foreground;
+  }
+
+  .markdown-body em {
+    @apply italic;
+  }
+}

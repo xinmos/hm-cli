@@ -24,6 +24,7 @@ export interface Message {
   created_at: string;
   tool_calls?: any[];
   isStreaming?: boolean;
+  streamPhase?: "thinking" | "responding";
 }
 
 export default function Home() {
@@ -47,6 +48,7 @@ export default function Home() {
             content: "",
             created_at: new Date().toISOString(),
             isStreaming: true,
+            streamPhase: "thinking",
           },
         ]);
         break;
@@ -56,7 +58,11 @@ export default function Home() {
           if (lastMsg?.isStreaming) {
             return [
               ...prev.slice(0, -1),
-              { ...lastMsg, content: lastMsg.content + data.delta },
+              {
+                ...lastMsg,
+                content: lastMsg.content + data.delta,
+                streamPhase: "responding",
+              },
             ];
           }
           return prev;
@@ -66,7 +72,10 @@ export default function Home() {
         setMessages((prev) => {
           const lastMsg = prev[prev.length - 1];
           if (lastMsg?.isStreaming) {
-            return [...prev.slice(0, -1), { ...lastMsg, isStreaming: false }];
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, isStreaming: false, streamPhase: undefined },
+            ];
           }
           return prev;
         });

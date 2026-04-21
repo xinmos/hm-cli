@@ -1,14 +1,74 @@
 "use client";
 
-import { User, Bot, Loader2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { User, Bot, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToolCallDisplay, type ToolCall } from "./ToolCallDisplay";
 import type { Message } from "@/app/page";
 
 interface MessageListProps {
   messages: Message[];
+  bottomRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+function MarkdownMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+  return (
+    <div className="markdown-body text-[15px] leading-7 text-foreground">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="mb-4 list-disc pl-6 space-y-2">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-4 list-decimal pl-6 space-y-2">{children}</ol>,
+          li: ({ children }) => <li className="marker:text-muted-foreground">{children}</li>,
+          h1: ({ children }) => <h1 className="mb-4 mt-6 text-2xl font-semibold first:mt-0">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-3 mt-6 text-xl font-semibold first:mt-0">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-3 mt-5 text-lg font-semibold first:mt-0">{children}</h3>,
+          blockquote: ({ children }) => (
+            <blockquote className="mb-4 border-l-4 border-border bg-muted/40 px-4 py-3 text-muted-foreground">
+              {children}
+            </blockquote>
+          ),
+          code: ({ inline, children }) =>
+            inline ? (
+              <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground">
+                {children}
+              </code>
+            ) : (
+              <code className="block overflow-x-auto rounded-xl bg-zinc-950 px-4 py-3 font-mono text-sm leading-6 text-zinc-100">
+                {children}
+              </code>
+            ),
+          pre: ({ children }) => <pre className="mb-4 mt-4 overflow-x-auto">{children}</pre>,
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-blue-600 underline underline-offset-4 hover:text-blue-500"
+            >
+              {children}
+            </a>
+          ),
+          table: ({ children }) => (
+            <div className="mb-4 mt-4 overflow-x-auto rounded-xl border border-border">
+              <table className="w-full border-collapse text-sm">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+          th: ({ children }) => <th className="border-b border-border px-3 py-2 text-left font-medium">{children}</th>,
+          td: ({ children }) => <td className="border-b border-border px-3 py-2 align-top last:border-b-0">{children}</td>,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+      {isStreaming && content !== "" && (
+        <span className="ml-1 inline-block h-5 w-2 translate-y-1 animate-pulse rounded-sm bg-blue-500/80" />
+      )}
+    </div>
+  );
 }
 
 function MessageItem({ message }: { message: Message }) {
@@ -52,16 +112,27 @@ function MessageItem({ message }: { message: Message }) {
                 minute: "2-digit",
               })}
             </span>
+            {isAssistant && message.isStreaming && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                <Sparkles className="h-3 w-3" />
+                {message.streamPhase === "thinking" ? "思考中" : "输出中"}
+              </span>
+            )}
           </div>
 
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            {message.isStreaming && message.content === "" ? (
-              <div className="flex items-center gap-2 text-muted-foreground">
+          <div className="max-w-none">
+            {message.isStreaming && message.streamPhase === "thinking" ? (
+              <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-blue-700">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span>思考中...</span>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">Hermes 正在思考</span>
+                  <span className="text-xs text-blue-600/80">我在整理答案结构，很快开始输出。</span>
+                </div>
               </div>
+            ) : isUser ? (
+              <div className="whitespace-pre-wrap text-[15px] leading-7">{message.content}</div>
             ) : (
-              <div className="whitespace-pre-wrap">{message.content}</div>
+              <MarkdownMessage content={message.content} isStreaming={message.isStreaming} />
             )}
           </div>
 
@@ -86,7 +157,7 @@ function MessageItem({ message }: { message: Message }) {
   );
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, bottomRef }: MessageListProps) {
   if (messages.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-center">
@@ -102,12 +173,11 @@ export function MessageList({ messages }: MessageListProps) {
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="divide-y divide-border/50">
-        {messages.map((message) => (
-          <MessageItem key={message.id} message={message} />
-        ))}
-      </div>
-    </ScrollArea>
+    <div className="divide-y divide-border/50">
+      {messages.map((message) => (
+        <MessageItem key={message.id} message={message} />
+      ))}
+      <div ref={bottomRef} className="h-0" />
+    </div>
   );
 }

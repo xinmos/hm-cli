@@ -12,19 +12,23 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ messages, onSendMessage, isConnected }: ChatAreaProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const lastMessage = messages[messages.length - 1];
+    if (!bottomRef.current) return;
+
+    bottomRef.current.scrollIntoView({
+      behavior: lastMessage?.isStreaming ? "auto" : "smooth",
+      block: "end",
+    });
   }, [messages]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-background">
       {/* Message List */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <MessageList messages={messages} />
+      <div className="flex-1 overflow-y-auto">
+        <MessageList messages={messages} bottomRef={bottomRef} />
       </div>
 
       {/* Chat Input - Centered in main content area */}
