@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import asyncio
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -103,12 +107,10 @@ class ControlPlaneApp:
         return instructions
 
     def _run_with_memory(self, user_input: str):
-        import asyncio
-
         memory_context = ""
         if self.memory:
             try:
-                context = asyncio.run(
+                context = _run_coroutine_sync(
                     self.memory.retrieve_relevant_context(
                         query=user_input,
                         max_tokens=2000,
@@ -140,7 +142,7 @@ class ControlPlaneApp:
 
         if self.memory:
             try:
-                asyncio.run(
+                _run_coroutine_sync(
                     self.memory.process_interaction(
                         user_input=user_input,
                         agent_response=full_response,
@@ -151,12 +153,42 @@ class ControlPlaneApp:
                 pass
 
 
-def bootstrap(
+class ControlPlaneRuntime:
+    def __init__(
+        self,
+        scheduler_driver: SchedulerDriver,
+        task_service: TaskService,
+        *,
+        load_persistent_tasks: bool = True,
+    ):
+        self._scheduler_driver = scheduler_driver
+        self._task_service = task_service
+        self._load_persistent_tasks = load_persistent_tasks
+        self._started = False
+
+    def start(self) -> None:
+        if self._started:
+            return
+        self._scheduler_driver.start()
+        if self._load_persistent_tasks:
+            self._task_service.load_persistent_tasks()
+        self._started = True
+
+    def stop(self) -> None:
+        if not self._started:
+            return
+        self._scheduler_driver.shutdown()
+        self._started = False
+
+
+def assemble_control_plane(
     env_file: Path | None = None,
+    settings: Settings | None = None,
     interaction_port: InteractionPort | None = None,
     soul_name: str | None = None,
-) -> ControlPlaneApp:
-    settings = Settings.from_env_and_args(env_file=env_file)
+) -> tuple[ControlPlaneApp, ControlPlaneRuntime]:
+    if settings is None:
+        settings = Settings.from_env_and_args(env_file=env_file)
 
     skill_repo: SkillRepository = FileSkillRepository(settings.workdir)
     task_store: TaskStore = JsonTaskStore(settings.tasks_path)
@@ -199,10 +231,7 @@ def bootstrap(
     agent_session.set_tools(tool_catalog.get_tools())
 
     scheduler_driver: SchedulerDriver = APSchedulerDriver()
-    scheduler_driver.start()
-
     task_service = TaskService(task_store, scheduler_driver)
-    task_service.load_persistent_tasks()
 
     # 初始化记忆系统
     memory_config = MemoryConfig(
@@ -212,7 +241,7 @@ def bootstrap(
     )
     memory_manager = MemoryManager(config=memory_config)
 
-    return ControlPlaneApp(
+    app = ControlPlaneApp(
         settings=settings,
         agent_session=agent_session,
         skill_service=skill_service,
@@ -222,6 +251,25 @@ def bootstrap(
         interaction_port=interaction_port,
         memory_manager=memory_manager,
     )
+    runtime = ControlPlaneRuntime(
+        scheduler_driver=scheduler_driver,
+        task_service=task_service,
+    )
+    return app, runtime
+
+
+def bootstrap(
+    env_file: Path | None = None,
+    interaction_port: InteractionPort | None = None,
+    soul_name: str | None = None,
+) -> ControlPlaneApp:
+    app, runtime = assemble_control_plane(
+        env_file=env_file,
+        interaction_port=interaction_port,
+        soul_name=soul_name,
+    )
+    runtime.start()
+    return app
 
 
 def _build_system_prompt_base(skill_repo: SkillRepository | None) -> str:
@@ -242,3 +290,27 @@ def _build_system_prompt_base(skill_repo: SkillRepository | None) -> str:
         skill_section += f"- {skill.name}: {skill.description}\n"
 
     return base_prompt + skill_section
+
+
+def _run_coroutine_sync(coroutine: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    result: dict[str, Any] = {}
+    error: dict[str, Exception] = {}
+
+    def runner() -> None:
+        try:
+            result["value"] = asyncio.run(coroutine)
+        except Exception as exc:  # pragma: no cover - defensive bridge for async callers
+            error["value"] = exc
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    thread.join()
+
+    if "value" in error:
+        raise error["value"]
+    return result.get("value")

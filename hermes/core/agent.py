@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Iterable
 
 from hermes.app.ports import AgentBackend, InteractionPort, Message
