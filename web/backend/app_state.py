@@ -8,6 +8,7 @@ _project_root = Path(__file__).parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
+from hermes.app import InteractionPort
 from hermes.app.bootstrap import ControlPlaneApp, ControlPlaneRuntime, assemble_control_plane
 from hermes.app.settings import Settings
 from hermes.infra.persistence.json_chat_store import JsonChatStore
@@ -21,8 +22,14 @@ class WebServiceContainer:
     model_catalog: ModelCatalogService
     project_service: ProjectService
 
-    def create_control_plane(self) -> tuple[ControlPlaneApp, ControlPlaneRuntime]:
-        return assemble_control_plane(settings=self.settings)
+    def create_control_plane(
+        self,
+        interaction_port: InteractionPort | None = None,
+    ) -> tuple[ControlPlaneApp, ControlPlaneRuntime]:
+        return assemble_control_plane(
+            settings=self.settings,
+            interaction_port=interaction_port,
+        )
 
 
 def build_web_services() -> WebServiceContainer:

@@ -124,6 +124,10 @@ class ChatStore(Protocol):
         """Delete a chat and all of its messages."""
         ...
 
+    def rename_chat(self, chat_id: str, title: str) -> ChatSummary | None:
+        """Rename a chat and return the updated summary."""
+        ...
+
 
 class ToolCatalog(Protocol):
     def get_tools(self) -> list[Any]:

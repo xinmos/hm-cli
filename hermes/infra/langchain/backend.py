@@ -28,6 +28,7 @@ class LangChainOpenAIBackend(AgentBackend):
         self._last_token_usage = 0
 
     def stream(self, messages: list[Message], tools: list[Any] | None = None) -> Iterable[AgentEvent]:
+        self._last_token_usage = 0
         lc_messages = self._to_langchain_messages(messages)
 
         if tools:
@@ -43,7 +44,7 @@ class LangChainOpenAIBackend(AgentBackend):
                     )
 
                 if isinstance(msg, AIMessageChunk):
-                    content = msg.content
+                    content = self._coerce_content_to_text(msg.content)
                     if content:
                         yield AgentEvent(event_type="content", data={"content": content})
 
@@ -59,7 +60,7 @@ class LangChainOpenAIBackend(AgentBackend):
                             yield AgentEvent(event_type="token_usage", data={"tokens": delta})
         else:
             for chunk in self._model.stream(lc_messages):
-                content = chunk.content
+                content = self._coerce_content_to_text(chunk.content)
                 if content:
                     yield AgentEvent(event_type="content", data={"content": content})
 
@@ -84,6 +85,31 @@ class LangChainOpenAIBackend(AgentBackend):
             elif msg.role == "assistant":
                 result.append(AIMessage(content=msg.content))
         return result
+
+    def _coerce_content_to_text(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if not isinstance(item, dict):
+                    continue
+
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+
+                # Some providers nest text under content fragments.
+                if item.get("type") == "text":
+                    nested_text = item.get("content")
+                    if isinstance(nested_text, str):
+                        parts.append(nested_text)
+            return "".join(parts)
+        return ""
 
     def _format_tool_display(self, tool_name: str, args: dict) -> str:
         """Format tool call for display in a concise way"""

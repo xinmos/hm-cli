@@ -1,16 +1,77 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { User, Bot, Loader2, Sparkles } from "lucide-react";
+import {
+  User,
+  Bot,
+  Loader2,
+  Sparkles,
+  Clock3,
+  Command,
+  FileText,
+  Edit3,
+  Search,
+  Globe,
+  Terminal,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ToolCallDisplay, type ToolCall } from "./ToolCallDisplay";
 import type { Message } from "@/app/page";
 
 interface MessageListProps {
   messages: Message[];
-  bottomRef?: React.RefObject<HTMLDivElement | null>;
+  bottomRef?: React.RefObject<HTMLDivElement>;
+}
+
+const actionIcons: Record<string, React.ElementType> = {
+  Bash: Command,
+  Read: FileText,
+  Write: Edit3,
+  Edit: Edit3,
+  Grep: Search,
+  Glob: Search,
+  WebFetch: Globe,
+  WebSearch: Globe,
+  memory: Clock3,
+  default: Loader2,
+};
+
+function ThinkingStatus({ currentAction }: { currentAction?: string }) {
+  const [dotCount, setDotCount] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setDotCount((current) => (current + 1) % 3);
+    }, 450);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const action = currentAction || "正在分析你的问题";
+  const toolName = action.includes("(") ? action.split("(", 1)[0].trim() : "";
+  const CurrentIcon = actionIcons[toolName] || actionIcons.default;
+  const dots = ".".repeat(dotCount + 1);
+
+  return (
+    <div className="rounded-3xl border border-sky-200/80 bg-[linear-gradient(135deg,rgba(240,249,255,0.95),rgba(239,246,255,0.72))] px-4 py-4 text-sky-900 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/85 shadow-sm ring-1 ring-sky-200/70">
+          <CurrentIcon className={cn("h-4 w-4 text-sky-700", CurrentIcon === Loader2 && "animate-spin")} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold tracking-[0.01em]">Hermes 正在处理</span>
+            <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-sky-700 ring-1 ring-sky-200/80">
+              当前动作
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-sky-800/85">{action}</p>
+          <p className="mt-2 text-xs text-sky-700/70">我在整理结果{dots}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MarkdownMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
@@ -31,13 +92,13 @@ function MarkdownMessage({ content, isStreaming }: { content: string; isStreamin
               {children}
             </blockquote>
           ),
-          code: ({ inline, children }) =>
-            inline ? (
-              <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground">
+          code: ({ children, className }) =>
+            className ? (
+              <code className="block overflow-x-auto rounded-xl bg-zinc-950 px-4 py-3 font-mono text-sm leading-6 text-zinc-100">
                 {children}
               </code>
             ) : (
-              <code className="block overflow-x-auto rounded-xl bg-zinc-950 px-4 py-3 font-mono text-sm leading-6 text-zinc-100">
+              <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground">
                 {children}
               </code>
             ),
@@ -115,42 +176,20 @@ function MessageItem({ message }: { message: Message }) {
             {isAssistant && message.isStreaming && (
               <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
                 <Sparkles className="h-3 w-3" />
-                {message.streamPhase === "thinking" ? "思考中" : "输出中"}
+                {message.streamPhase === "thinking" ? "处理中" : "输出中"}
               </span>
             )}
           </div>
 
           <div className="max-w-none">
             {message.isStreaming && message.streamPhase === "thinking" ? (
-              <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-blue-700">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium">Hermes 正在思考</span>
-                  <span className="text-xs text-blue-600/80">我在整理答案结构，很快开始输出。</span>
-                </div>
-              </div>
+              <ThinkingStatus currentAction={message.currentAction} />
             ) : isUser ? (
               <div className="whitespace-pre-wrap text-[15px] leading-7">{message.content}</div>
             ) : (
               <MarkdownMessage content={message.content} isStreaming={message.isStreaming} />
             )}
           </div>
-
-          {/* Tool calls if any */}
-          {message.tool_calls && message.tool_calls.length > 0 && (
-            <ToolCallDisplay
-              toolCalls={message.tool_calls.map((tool: any, idx: number) => ({
-                id: tool.id || `tool-${idx}`,
-                name: tool.name || tool.function?.name || "unknown",
-                args: tool.args || tool.function?.arguments || {},
-                status: tool.status || "success",
-                result: tool.result,
-                error: tool.error,
-                startTime: tool.startTime,
-                endTime: tool.endTime,
-              }))}
-            />
-          )}
         </div>
       </div>
     </div>

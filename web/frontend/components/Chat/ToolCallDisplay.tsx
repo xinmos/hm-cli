@@ -24,6 +24,7 @@ export interface ToolCall {
   name: string;
   args: Record<string, any>;
   status: "pending" | "running" | "success" | "error";
+  display?: string;
   result?: any;
   error?: string;
   startTime?: string;

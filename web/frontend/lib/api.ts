@@ -1,5 +1,26 @@
 import { Chat, Message } from "@/app/page";
 
+export interface WorkspaceInfo {
+  project_name: string;
+  project_path: string;
+  branch: string;
+  model: string;
+  context_window: number;
+}
+
+export interface WorkspaceFileItem {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number | null;
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  content: string;
+  size: number;
+}
+
 // 根据环境确定 API 基础 URL
 // 开发环境：前端在 3000，后端在 8000
 // 生产环境：使用相对路径（同源）
@@ -15,6 +36,61 @@ const getApiBase = () => {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || getApiBase();
+
+export interface ChatStreamPayload {
+  message: string;
+  permissions: string;
+  model: string;
+  message_id: string;
+  attachments?: ChatAttachment[];
+}
+
+export interface ChatAttachment {
+  name: string;
+  type: "file" | "image";
+  content: string;
+  mime_type?: string;
+}
+
+export interface StreamChatOptions {
+  onEvent: (data: any) => void;
+  signal?: AbortSignal;
+}
+
+function parseSseEvent(chunk: string): { event: string; data: any } | null {
+  const lines = chunk
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== "");
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim() || "message";
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  const data = JSON.parse(dataLines.join("\n"));
+  if (data && typeof data === "object" && !("type" in data)) {
+    data.type = event;
+  }
+
+  return { event, data };
+}
 
 export async function fetchChats(): Promise<Chat[]> {
   const res = await fetch(`${API_BASE}/api/chats`);
@@ -48,4 +124,102 @@ export async function deleteChat(chatId: string): Promise<void> {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete chat");
+}
+
+export async function renameChat(chatId: string, title: string): Promise<Chat> {
+  const res = await fetch(`${API_BASE}/api/chats/${chatId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error("Failed to rename chat");
+  return res.json();
+}
+
+export async function fetchWorkspaceInfo(): Promise<WorkspaceInfo> {
+  const res = await fetch(`${API_BASE}/api/workspace`);
+  if (!res.ok) throw new Error("Failed to fetch workspace info");
+  return res.json();
+}
+
+export async function fetchWorkspaceFiles(path = ""): Promise<WorkspaceFileItem[]> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/api/workspace/files?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch workspace files");
+  return res.json();
+}
+
+export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFileContent> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/api/workspace/file?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch workspace file");
+  return res.json();
+}
+
+export async function saveWorkspaceFile(path: string, content: string): Promise<WorkspaceFileContent> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/api/workspace/file?${params.toString()}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to save workspace file");
+  return res.json();
+}
+
+export async function streamChatMessage(
+  chatId: string,
+  payload: ChatStreamPayload,
+  options: StreamChatOptions,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/chats/${chatId}/messages/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to stream message (${res.status})`);
+  }
+  if (!res.body) {
+    throw new Error("Streaming response body is not available");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    buffer = buffer.replace(/\r\n/g, "\n");
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const rawEvent = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+
+      const parsed = parseSseEvent(rawEvent);
+      if (parsed) {
+        options.onEvent(parsed.data);
+      }
+
+      boundary = buffer.indexOf("\n\n");
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  if (buffer.trim()) {
+    const parsed = parseSseEvent(buffer);
+    if (parsed) {
+      options.onEvent(parsed.data);
+    }
+  }
 }

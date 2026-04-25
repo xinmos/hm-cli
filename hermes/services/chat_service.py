@@ -21,3 +21,9 @@ class ChatService:
 
     def delete_chat(self, chat_id: str) -> None:
         self._store.delete_chat(chat_id)
+
+    def rename_chat(self, chat_id: str, title: str):
+        normalized_title = title.strip()
+        if not normalized_title:
+            return None
+        return self._store.rename_chat(chat_id, normalized_title)

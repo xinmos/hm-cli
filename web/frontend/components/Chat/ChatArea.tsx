@@ -4,14 +4,29 @@ import { useRef, useEffect } from "react";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import type { Message } from "@/app/page";
+import type { ChatAttachment, WorkspaceInfo } from "@/lib/api";
 
 interface ChatAreaProps {
   messages: Message[];
-  onSendMessage: (message: string, options: { permissions: string; model: string }) => void;
+  onSendMessage: (
+    message: string,
+    options: { permissions: string; model: string; attachments?: ChatAttachment[] },
+  ) => void;
   isConnected: boolean;
+  workspaceInfo: WorkspaceInfo | null;
+  tokenUsage: {
+    used: number;
+    total: number;
+  };
 }
 
-export function ChatArea({ messages, onSendMessage, isConnected }: ChatAreaProps) {
+export function ChatArea({
+  messages,
+  onSendMessage,
+  isConnected,
+  workspaceInfo,
+  tokenUsage,
+}: ChatAreaProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,7 +52,9 @@ export function ChatArea({ messages, onSendMessage, isConnected }: ChatAreaProps
           <ChatInput
             onSend={onSendMessage}
             isConnected={isConnected}
-            disabled={false}
+            disabled={!isConnected}
+            workspaceInfo={workspaceInfo}
+            tokenUsage={tokenUsage}
           />
         </div>
       </div>

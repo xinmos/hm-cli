@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Menu, Check, ChevronDown, Wifi, WifiOff, RefreshCw } from "lucide-react";
+import { Menu, Check, ChevronDown, Wifi, WifiOff, RefreshCw, Code2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,7 @@ import {
 interface HeaderProps {
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
+  onToggleWorkspace: () => void;
   title: string;
   connectionStatus: "connecting" | "connected" | "disconnected";
 }
@@ -33,6 +34,7 @@ const models = [
 export function Header({
   isSidebarOpen,
   onToggleSidebar,
+  onToggleWorkspace,
   title,
   connectionStatus,
 }: HeaderProps) {
@@ -59,6 +61,17 @@ export function Header({
         </div>
 
         <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={onToggleWorkspace}>
+                <Code2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>打开工作区编辑器</p>
+            </TooltipContent>
+          </Tooltip>
+
           {/* Connection Status */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -82,10 +95,10 @@ export function Header({
             <TooltipContent>
               <p>
                 {connectionStatus === "connected"
-                  ? "WebSocket 连接正常"
+                  ? "SSE 流式服务可用"
                   : connectionStatus === "connecting"
-                  ? "正在建立连接..."
-                  : "连接已断开，正在尝试重连"}
+                  ? "正在接收流式响应..."
+                  : "最近一次流式请求失败"}
               </p>
             </TooltipContent>
           </Tooltip>

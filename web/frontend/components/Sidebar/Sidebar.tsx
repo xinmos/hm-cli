@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, Puzzle, Bot, Settings, MessageSquare } from "lucide-react";
+import { Plus, Search, Puzzle, Bot, Settings, MessageSquare, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,6 +15,8 @@ interface SidebarProps {
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onNewChat: () => void;
+  onDeleteChats?: (chatIds: string[]) => Promise<void>;
+  onRenameChat?: (chatId: string, title: string) => Promise<void>;
 }
 
 export function Sidebar({
@@ -24,9 +26,14 @@ export function Sidebar({
   currentChatId,
   onSelectChat,
   onNewChat,
+  onDeleteChats,
+  onRenameChat,
 }: SidebarProps) {
   const [activeSection, setActiveSection] = useState<"chat" | "search" | "plugins" | "automation" | "settings">("chat");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null);
 
   const groupedChats = chats.reduce((groups, chat) => {
     const date = new Date(chat.updated_at);
@@ -45,6 +52,28 @@ export function Sidebar({
   }, {} as Record<string, Chat[]>);
 
   const groupOrder = ["今天", "昨天", "最近 7 天", "最近 30 天", "更早"];
+
+  const handleRename = async (chat: Chat) => {
+    setContextMenu(null);
+    setEditingChatId(chat.id);
+    setEditingTitle(chat.title);
+  };
+
+  const handleRenameSubmit = async (chatId: string) => {
+    if (!editingTitle.trim()) {
+      setEditingChatId(null);
+      return;
+    }
+    await onRenameChat?.(chatId, editingTitle.trim());
+    setEditingChatId(null);
+  };
+
+  const handleDelete = async (chat: Chat) => {
+    setContextMenu(null);
+    const confirmed = window.confirm(`确认删除"${chat.title}"吗？`);
+    if (!confirmed) return;
+    await onDeleteChats?.([chat.id]);
+  };
 
   return (
     <>
@@ -113,7 +142,13 @@ export function Sidebar({
         <div className="flex-1 overflow-hidden flex flex-col min-h-0 px-2">
           {activeSection === "chat" ? (
             <>
-              <div className="pb-2 shrink-0" />
+              <div className="py-2 shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground px-2">
+                    聊天列表
+                  </span>
+                </div>
+              </div>
               <ScrollArea className="flex-1 min-h-0">
                 <div className="pb-2">
                   {groupOrder.map((group) => {
@@ -127,18 +162,47 @@ export function Sidebar({
                         </h3>
                         <div className="space-y-0.5">
                           {groupChats.map((chat) => (
-                            <button
+                            <div
                               key={chat.id}
-                              onClick={() => onSelectChat(chat.id)}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                setContextMenu({ chat, x: event.clientX, y: event.clientY });
+                              }}
                               className={cn(
-                                "w-full text-left px-2 py-1.5 rounded text-sm transition-colors",
+                                "flex w-full items-center rounded text-sm transition-colors",
                                 currentChatId === chat.id
                                   ? "bg-white shadow-sm"
                                   : "hover:bg-white/50"
                               )}
                             >
-                              <div className="truncate">{chat.title}</div>
-                            </button>
+                              {editingChatId === chat.id ? (
+                                <div className="w-full px-2 py-1.5">
+                                  <input
+                                    autoFocus
+                                    value={editingTitle}
+                                    onChange={(e) => setEditingTitle(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        void handleRenameSubmit(chat.id);
+                                      } else if (e.key === "Escape") {
+                                        setEditingChatId(null);
+                                      }
+                                    }}
+                                    onBlur={() => void handleRenameSubmit(chat.id)}
+                                    className="w-full rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+                                  />
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => onSelectChat(chat.id)}
+                                    className="min-w-0 flex-1 overflow-hidden px-2 py-1.5 text-left"
+                                  >
+                                    <div className="truncate pr-1">{chat.title}</div>
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -181,6 +245,40 @@ export function Sidebar({
           </Button>
         </div>
       </aside>
+
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[55]"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-[60] w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <button
+              type="button"
+              className="flex w-full items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => void handleRename(contextMenu.chat)}
+            >
+              <Pencil className="mr-2 h-4 w-4" />
+              重命名
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center rounded-sm px-2 py-1.5 text-sm text-destructive outline-none transition-colors hover:bg-accent hover:text-destructive"
+              onClick={() => void handleDelete(contextMenu.chat)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              删除
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Settings Panel */}
       <SettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

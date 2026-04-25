@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile.backend
+    env_file:
+      - ../.env
+    environment:
+      HERMES_WORKDIR: /workspace
+    ports:
+      - "8000:8000"
+    volumes:
+      - ..:/workspace
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "uv", "run", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: web/frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
