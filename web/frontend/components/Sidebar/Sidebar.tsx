@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SettingsPanel } from "@/components/Settings/SettingsPanel";
+import { SkillsPanel } from "@/components/Skills/SkillsPanel";
 import type { Chat } from "@/app/page";
 
 interface SidebarProps {
@@ -29,8 +30,9 @@ export function Sidebar({
   onDeleteChats,
   onRenameChat,
 }: SidebarProps) {
-  const [activeSection, setActiveSection] = useState<"chat" | "search" | "plugins" | "automation" | "settings">("chat");
+  const [activeSection, setActiveSection] = useState<"chat" | "search" | "skills" | "automation" | "settings">("chat");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSkillsOpen, setIsSkillsOpen] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null);
@@ -118,12 +120,15 @@ export function Sidebar({
             variant="ghost"
             className={cn(
               "justify-start gap-3 h-10 px-3 mb-0.5",
-              activeSection === "plugins" && "bg-white shadow-sm"
+              activeSection === "skills" && "bg-white shadow-sm"
             )}
-            onClick={() => setActiveSection("plugins")}
+            onClick={() => {
+              setActiveSection("skills");
+              setIsSkillsOpen(true);
+            }}
           >
             <Puzzle className="h-4 w-4" />
-            插件
+            技能
           </Button>
           <Button
             variant="ghost"
@@ -212,12 +217,22 @@ export function Sidebar({
               </ScrollArea>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex flex-col items-center justify-center">
               <p className="text-muted-foreground">
                 {activeSection === "search" && "搜索功能开发中..."}
-                {activeSection === "plugins" && "插件管理开发中..."}
+                {activeSection === "skills" && "技能管理"}
                 {activeSection === "automation" && "自动化功能开发中..."}
               </p>
+              {activeSection === "skills" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => setIsSkillsOpen(true)}
+                >
+                  打开
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -281,6 +296,7 @@ export function Sidebar({
       )}
 
       {/* Settings Panel */}
+      <SkillsPanel isOpen={isSkillsOpen} onClose={() => setIsSkillsOpen(false)} />
       <SettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </>
   );

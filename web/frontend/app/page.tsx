@@ -59,7 +59,6 @@ export default function Home() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("disconnected");
   const [pendingOutbound, setPendingOutbound] = useState<PendingOutboundMessage | null>(null);
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   const [tokenUsage, setTokenUsage] = useState({ used: 0, total: 256 * 1024 });
@@ -70,7 +69,6 @@ export default function Home() {
     switch (data.type) {
       case "stream_start":
         setIsStreaming(true);
-        setConnectionStatus("connecting");
         setMessages((prev) => [
           ...prev,
           {
@@ -131,7 +129,6 @@ export default function Home() {
         break;
       case "error":
         setIsStreaming(false);
-        setConnectionStatus("disconnected");
         setMessages((prev) => {
           const errorText = data.error || "请求失败，请稍后重试。";
           const lastMsg = prev[prev.length - 1];
@@ -166,7 +163,6 @@ export default function Home() {
           total: data.tokens_total || workspaceInfo?.context_window || 256 * 1024,
         });
         setIsStreaming(false);
-        setConnectionStatus("connected");
         break;
     }
   }, [workspaceInfo]);
@@ -175,7 +171,6 @@ export default function Home() {
     streamAbortRef.current?.abort();
     const controller = new AbortController();
     streamAbortRef.current = controller;
-    setConnectionStatus("connecting");
 
     try {
       await streamChatMessage(chatId, payload, {
@@ -193,7 +188,6 @@ export default function Home() {
         error: "请求失败，请稍后重试。",
       });
       setIsStreaming(false);
-      setConnectionStatus("disconnected");
     } finally {
       if (streamAbortRef.current === controller) {
         streamAbortRef.current = null;
@@ -243,7 +237,6 @@ export default function Home() {
   const handleSelectChat = async (chatId: string) => {
     streamAbortRef.current?.abort();
     setIsStreaming(false);
-    setConnectionStatus("connected");
     setCurrentChatId(chatId);
     // 加载聊天记录
     try {
@@ -257,7 +250,6 @@ export default function Home() {
   const handleNewChat = async () => {
     streamAbortRef.current?.abort();
     setIsStreaming(false);
-    setConnectionStatus("connected");
     setCurrentChatId(null);
     setMessages([]);
   };
@@ -330,7 +322,6 @@ export default function Home() {
     try {
       const data = await fetchWorkspaceInfo();
       setWorkspaceInfo(data);
-      setConnectionStatus("connected");
       setTokenUsage((prev) => ({
         used: prev.used,
         total: data.context_window,
@@ -365,7 +356,6 @@ export default function Home() {
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           onToggleWorkspace={() => setIsWorkspaceOpen((prev) => !prev)}
           title={currentChatId ? chats.find((c) => c.id === currentChatId)?.title || "Chat" : "New Chat"}
-          connectionStatus={connectionStatus}
         />
 
         <ChatArea

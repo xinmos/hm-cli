@@ -93,6 +93,8 @@ class FileSkillRepository:
         )
 
     def _register(self, skill: SkillInfo) -> None:
+        if skill.metadata.get("enabled") is False:
+            return
         self._skills[skill.name] = skill
         self._slash_commands[skill.slash_command] = skill.name
 

@@ -9,7 +9,7 @@ _project_root = Path(__file__).parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from web.backend.api.routes import chats, models, projects, workspace
+from web.backend.api.routes import chats, models, projects, skills, workspace
 from web.backend.app_state import build_web_services
 from web.backend.session_manager import SessionManager
 
@@ -39,9 +39,10 @@ app.add_middleware(
 )
 
 app.include_router(chats.router, prefix="/api", tags=["chats"])
-app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(models.router, prefix="/api", tags=["models"])
+app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(workspace.router, prefix="/api/workspace", tags=["workspace"])
+app.include_router(projects.router, prefix="/api", tags=["projects"])
 
 
 @app.websocket("/ws/chat/{session_id}")

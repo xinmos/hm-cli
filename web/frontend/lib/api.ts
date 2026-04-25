@@ -21,6 +21,60 @@ export interface WorkspaceFileContent {
   size: number;
 }
 
+export interface SkillSummary {
+  path: string;
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  enabled: boolean;
+  slash_command: string;
+  allowed_tools: string;
+  capabilities: string[];
+  size: number;
+  updated_at: string;
+}
+
+export interface SkillFile {
+  skill: SkillSummary;
+  content: string;
+}
+
+export interface MarketSkill {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  capabilities: string[];
+  allowed_tools: string;
+  source_id: string;
+  content?: string;
+  source_url?: string;
+}
+
+export interface SkillMarketSource {
+  id: string;
+  name: string;
+  url: string;
+}
+
+function normalizeSkillList(data: unknown): SkillSummary[] {
+  if (Array.isArray(data)) {
+    return data as SkillSummary[];
+  }
+  if (
+    data &&
+    typeof data === "object" &&
+    "skills" in data &&
+    Array.isArray((data as { skills?: unknown }).skills)
+  ) {
+    return (data as { skills: SkillSummary[] }).skills;
+  }
+  throw new Error("Invalid skills response");
+}
+
 // 根据环境确定 API 基础 URL
 // 开发环境：前端在 3000，后端在 8000
 // 生产环境：使用相对路径（同源）
@@ -165,6 +219,58 @@ export async function saveWorkspaceFile(path: string, content: string): Promise<
   });
   if (!res.ok) throw new Error("Failed to save workspace file");
   return res.json();
+}
+
+export async function fetchLocalSkills(): Promise<SkillSummary[]> {
+  const res = await fetch(`${API_BASE}/api/skills`);
+  if (!res.ok) throw new Error("Failed to fetch skills");
+  return normalizeSkillList(await res.json());
+}
+
+export async function fetchSkillMarketSources(): Promise<SkillMarketSource[]> {
+  const res = await fetch(`${API_BASE}/api/skills/sources`);
+  if (!res.ok) throw new Error("Failed to fetch skill sources");
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error("Invalid skill sources response");
+  return data;
+}
+
+export async function fetchMarketSkills(sourceId: string): Promise<MarketSkill[]> {
+  const params = new URLSearchParams({ source_id: sourceId });
+  const res = await fetch(`${API_BASE}/api/skills/market?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch market skills");
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error("Invalid market response");
+  return data;
+}
+
+export async function installMarketSkill(id: string, sourceId: string): Promise<SkillFile> {
+  const res = await fetch(`${API_BASE}/api/skills/install`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, source_id: sourceId }),
+  });
+  if (!res.ok) throw new Error("Failed to install skill");
+  return res.json();
+}
+
+export async function setLocalSkillEnabled(path: string, enabled: boolean): Promise<SkillSummary> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/api/skills/file/enabled?${params.toString()}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error("Failed to update skill state");
+  return res.json();
+}
+
+export async function deleteLocalSkill(path: string): Promise<void> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/api/skills/file?${params.toString()}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete skill");
 }
 
 export async function streamChatMessage(

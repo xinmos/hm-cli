@@ -1,8 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Menu, Check, ChevronDown, Wifi, WifiOff, RefreshCw, Code2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Menu, Check, ChevronDown, Code2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -22,7 +21,6 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onToggleWorkspace: () => void;
   title: string;
-  connectionStatus: "connecting" | "connected" | "disconnected";
 }
 
 const models = [
@@ -36,7 +34,6 @@ export function Header({
   onToggleSidebar,
   onToggleWorkspace,
   title,
-  connectionStatus,
 }: HeaderProps) {
   const [selectedModel, setSelectedModel] = React.useState(models[0]);
 
@@ -69,37 +66,6 @@ export function Header({
             </TooltipTrigger>
             <TooltipContent>
               <p>打开工作区编辑器</p>
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Connection Status */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50">
-                {connectionStatus === "connected" ? (
-                  <Wifi className="h-3.5 w-3.5 text-green-500" />
-                ) : connectionStatus === "connecting" ? (
-                  <RefreshCw className="h-3.5 w-3.5 text-yellow-500 animate-spin" />
-                ) : (
-                  <WifiOff className="h-3.5 w-3.5 text-red-500" />
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {connectionStatus === "connected"
-                    ? "已连接"
-                    : connectionStatus === "connecting"
-                    ? "连接中..."
-                    : "已断开"}
-                </span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>
-                {connectionStatus === "connected"
-                  ? "SSE 流式服务可用"
-                  : connectionStatus === "connecting"
-                  ? "正在接收流式响应..."
-                  : "最近一次流式请求失败"}
-              </p>
             </TooltipContent>
           </Tooltip>
 
