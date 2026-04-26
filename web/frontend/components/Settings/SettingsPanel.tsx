@@ -2,16 +2,29 @@
 
 import { useState, useEffect } from "react";
 import {
-  Key,
-  Shield,
-  Palette,
-  Globe,
-  Keyboard,
-  Database,
-  Save,
-  RefreshCw,
+  Archive,
   Check,
-  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Eye,
+  EyeOff,
+  FileText,
+  Info,
+  Key,
+  ListTree,
+  MessageSquare,
+  Shield,
+  Database,
+  Download,
+  Plus,
+  RotateCcw,
+  Save,
+  Search,
+  ShieldAlert,
+  RefreshCw,
+  Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,6 +46,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  deleteChat,
+  fetchChats,
+  fetchModelConfig,
+  saveModelConfig,
+  type ModelConfig,
+} from "@/lib/api";
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -42,19 +62,21 @@ interface SettingsPanelProps {
 type SettingsCategory =
   | "model"
   | "permissions"
-  | "appearance"
-  | "general"
-  | "shortcuts"
   | "data";
 
-interface ModelSettings {
-  apiKey: string;
-  baseUrl: string;
-  defaultModel: string;
-  temperature: number;
-  maxTokens: number;
-  topP: number;
-}
+const defaultModelSettings: ModelConfig = {
+  provider: "openai-compatible",
+  api_key: "",
+  base_url: "",
+  model: "llama-model",
+  temperature: 0.7,
+  max_tokens: 2048,
+  timeout: 60,
+  max_retries: 2,
+  top_p: 1.0,
+  streaming: true,
+  custom_models: ["gpt-4o", "doubao-seed-2.0", "deepseek-chat", "qwen-max"],
+};
 
 interface PermissionSettings {
   autoApprove: boolean;
@@ -63,12 +85,74 @@ interface PermissionSettings {
   sandboxMode: boolean;
 }
 
-interface AppearanceSettings {
-  theme: "light" | "dark" | "system";
-  fontSize: "small" | "medium" | "large";
-  codeTheme: string;
-  showLineNumbers: boolean;
-  wordWrap: boolean;
+type DataTab = "overview" | "conversations";
+type ToastType = "success" | "error" | "info";
+type ToastState = { type: ToastType; message: string } | null;
+type HermesConversation = {
+  id: string;
+  title: string;
+  updated_at: string;
+  message_count: number;
+};
+
+const storageUsage = {
+  used: 832,
+  total: 1024,
+  chatIndex: 4,
+  messages: 612,
+  memory: 216,
+};
+
+const backupHistory = [
+  { id: "bk-1", name: "自动备份", time: "今天 09:20", size: "742 MB" },
+  { id: "bk-2", name: "手动备份", time: "昨天 18:04", size: "735 MB" },
+  { id: "bk-3", name: "恢复前临时备份", time: "4月24日 22:10", size: "728 MB" },
+  { id: "bk-4", name: "自动备份", time: "4月23日 09:20", size: "721 MB" },
+  { id: "bk-5", name: "自动备份", time: "4月22日 09:20", size: "718 MB" },
+];
+
+function normalizeModelSettings(settings: ModelConfig): ModelConfig {
+  const customModels = Array.from(
+    new Set(
+      [settings.model, ...(settings.custom_models || [])]
+        .map((model) => model.trim())
+        .filter(Boolean)
+    )
+  );
+
+  return {
+    ...settings,
+    api_key: settings.api_key?.trim() || null,
+    base_url: settings.base_url?.trim() || null,
+    model: settings.model.trim(),
+    temperature: Number(settings.temperature),
+    max_tokens: Number(settings.max_tokens),
+    timeout: Number(settings.timeout),
+    max_retries: Number(settings.max_retries),
+    top_p: Number(settings.top_p),
+    custom_models: customModels,
+  };
+}
+
+function validateModelSettings(settings: ModelConfig): string | null {
+  const normalized = normalizeModelSettings(settings);
+  if (!normalized.model) return "模型名称不能为空";
+  if (!Number.isFinite(normalized.temperature) || normalized.temperature < 0 || normalized.temperature > 2) {
+    return "Temperature 必须在 0 到 2 之间";
+  }
+  if (!Number.isInteger(normalized.max_tokens) || normalized.max_tokens < 1) {
+    return "Max Tokens 必须是正整数";
+  }
+  if (!Number.isInteger(normalized.timeout) || normalized.timeout < 1) {
+    return "Timeout 必须是正整数";
+  }
+  if (!Number.isInteger(normalized.max_retries) || normalized.max_retries < 0) {
+    return "Max Retries 必须是 0 或正整数";
+  }
+  if (!Number.isFinite(normalized.top_p) || normalized.top_p < 0 || normalized.top_p > 1) {
+    return "Top P 必须在 0 到 1 之间";
+  }
+  return null;
 }
 
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
@@ -77,14 +161,27 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
 
   // Model settings
-  const [modelSettings, setModelSettings] = useState<ModelSettings>({
-    apiKey: "",
-    baseUrl: "",
-    defaultModel: "doubao-seed-2.0",
-    temperature: 0.7,
-    maxTokens: 2000,
-    topP: 1.0,
-  });
+  const [modelSettings, setModelSettings] = useState<ModelConfig>(defaultModelSettings);
+  const [envSettings, setEnvSettings] = useState<Partial<ModelConfig>>({});
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [newModelName, setNewModelName] = useState("");
+  const [toast, setToast] = useState<ToastState>(null);
+
+  const [dataTab, setDataTab] = useState<DataTab>("overview");
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(false);
+  const [cleanupDays, setCleanupDays] = useState(90);
+  const [contextLimit, setContextLimit] = useState(256);
+  const [importConflict, setImportConflict] = useState<"skip" | "overwrite">("skip");
+  const [importFileName, setImportFileName] = useState("");
+  const [exportFormat, setExportFormat] = useState<"json" | "markdown">("json");
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(true);
+  const [backupFrequency, setBackupFrequency] = useState<"daily" | "weekly">("daily");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [conversationQuery, setConversationQuery] = useState("");
+  const [conversationFilter, setConversationFilter] = useState<"all" | "active" | "archived">("all");
+  const [selectedConversations, setSelectedConversations] = useState<string[]>([]);
+  const [hermesConversations, setHermesConversations] = useState<HermesConversation[]>([]);
 
   // Permission settings
   const [permissionSettings, setPermissionSettings] = useState<PermissionSettings>({
@@ -94,28 +191,41 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     sandboxMode: true,
   });
 
-  // Appearance settings
-  const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>({
-    theme: "system",
-    fontSize: "medium",
-    codeTheme: "github-dark",
-    showLineNumbers: true,
-    wordWrap: true,
-  });
-
-  // Load settings from localStorage on mount
   useEffect(() => {
+    let cancelled = false;
+    fetchModelConfig()
+      .then((response) => {
+        if (cancelled) return;
+        setModelSettings(response.config);
+        setEnvSettings(response.env_masked);
+      })
+      .catch((error) => {
+        console.error("Failed to load model config:", error);
+        setSaveStatus("error");
+      });
+
+    fetchChats()
+      .then((chats) => {
+        if (cancelled) return;
+        setHermesConversations(chats);
+      })
+      .catch((error) => {
+        console.error("Failed to load .hermes sessions:", error);
+      });
+
     const savedSettings = localStorage.getItem("hermes-settings");
     if (savedSettings) {
       try {
         const parsed = JSON.parse(savedSettings);
-        if (parsed.model) setModelSettings(parsed.model);
         if (parsed.permissions) setPermissionSettings(parsed.permissions);
-        if (parsed.appearance) setAppearanceSettings(parsed.appearance);
       } catch (e) {
         console.error("Failed to parse settings:", e);
       }
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Save settings
@@ -124,10 +234,17 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     setSaveStatus("idle");
 
     try {
+      const validationError = validateModelSettings(modelSettings);
+      if (validationError) {
+        setSaveStatus("error");
+        return;
+      }
+
+      const response = await saveModelConfig(normalizeModelSettings(modelSettings));
+      setModelSettings(response.config);
+      setEnvSettings(response.env_masked);
       const settings = {
-        model: modelSettings,
         permissions: permissionSettings,
-        appearance: appearanceSettings,
       };
       localStorage.setItem("hermes-settings", JSON.stringify(settings));
       setSaveStatus("success");
@@ -142,70 +259,153 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const categories = [
     { id: "model" as const, name: "模型配置", icon: Key },
     { id: "permissions" as const, name: "权限设置", icon: Shield },
-    { id: "appearance" as const, name: "外观设置", icon: Palette },
-    { id: "general" as const, name: "通用设置", icon: Globe },
-    { id: "shortcuts" as const, name: "快捷键", icon: Keyboard },
     { id: "data" as const, name: "数据管理", icon: Database },
   ];
+
+  const addCustomModel = (name: string) => {
+    const model = name.trim();
+    if (!model) return;
+    setModelSettings((prev) => ({
+      ...prev,
+      model,
+      custom_models: Array.from(new Set([model, ...prev.custom_models])),
+    }));
+    setNewModelName("");
+  };
+
+  const removeCustomModel = (name: string) => {
+    setModelSettings((prev) => ({
+      ...prev,
+      custom_models: prev.custom_models.filter((model) => model !== name),
+    }));
+  };
+
+  const fieldLabel = (label: string, tooltip: string) => (
+    <div className="flex items-center gap-1.5">
+      <label className="text-sm font-medium">{label}</label>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Info className="h-3.5 w-3.5 text-muted-foreground" />
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[280px] text-xs">{tooltip}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+
+  const showToast = (message: string, type: ToastType = "success") => {
+    setToast({ message, type });
+    window.setTimeout(() => setToast(null), 2600);
+  };
 
   // Render model settings
   const renderModelSettings = () => (
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium mb-1">模型配置</h3>
-        <p className="text-sm text-muted-foreground">配置 LLM 模型的 API 密钥和参数</p>
+        <p className="text-sm text-muted-foreground">保存后会写入后端配置文件，并在下一次 LLM 调用时生效</p>
       </div>
 
       <Separator />
 
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div className="space-y-2">
-          <label className="text-sm font-medium">API Key</label>
-          <Input
-            type="password"
-            placeholder="sk-..."
-            value={modelSettings.apiKey}
-            onChange={(e) =>
-              setModelSettings((prev) => ({ ...prev, apiKey: e.target.value }))
-            }
-          />
-          <p className="text-xs text-muted-foreground">你的 API 密钥将被安全地存储在本地</p>
+          {fieldLabel("API Key", "OpenAI 兼容 API 的密钥。默认从页面配置读取；为空时可回退到环境变量。")}
+          <div className="relative">
+            <Input
+              type={showApiKey ? "text" : "password"}
+              placeholder={String(envSettings.api_key || "sk-...")}
+              value={modelSettings.api_key || ""}
+              onChange={(e) =>
+                setModelSettings((prev) => ({ ...prev, api_key: e.target.value }))
+              }
+              className="pr-10"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1 h-8 w-8"
+              onClick={() => setShowApiKey((value) => !value)}
+            >
+              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
+          </div>
+          {envSettings.api_key && (
+            <p className="text-xs text-muted-foreground">环境变量回退值：{String(envSettings.api_key)}</p>
+          )}
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">Base URL (可选)</label>
+          {fieldLabel("Base URL", "OpenAI 兼容端点地址，例如自部署、Azure、Ollama 或国产模型 Provider。")}
           <Input
-            placeholder="https://api.openai.com/v1"
-            value={modelSettings.baseUrl}
+            placeholder={String(envSettings.base_url || "https://api.openai.com/v1")}
+            value={modelSettings.base_url || ""}
             onChange={(e) =>
-              setModelSettings((prev) => ({ ...prev, baseUrl: e.target.value }))
+              setModelSettings((prev) => ({ ...prev, base_url: e.target.value }))
             }
           />
+          {envSettings.base_url && (
+            <p className="text-xs text-muted-foreground">环境变量回退值：{String(envSettings.base_url)}</p>
+          )}
         </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium">默认模型</label>
-          <Select
-            value={modelSettings.defaultModel}
-            onValueChange={(value) =>
-              setModelSettings((prev) => ({ ...prev, defaultModel: value }))
-            }
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="doubao-seed-2.0">Doubao-Seed-2.0</SelectItem>
-              <SelectItem value="gpt-4">GPT-4</SelectItem>
-              <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-              <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              {fieldLabel("常用模型列表", "点击模型标签即可设为当前默认模型；新增模型会随配置一起持久化。")}
+              <p className="text-xs text-muted-foreground">
+                当前模型：{modelSettings.model || String(envSettings.model || "未设置")}
+                {envSettings.model && !modelSettings.model ? `；环境变量回退值：${String(envSettings.model)}` : ""}
+              </p>
+            </div>
+            <div className="flex min-w-[260px] gap-2">
+              <Input
+                value={newModelName}
+                placeholder="添加模型名"
+                onChange={(e) => setNewModelName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomModel(newModelName);
+                  }
+                }}
+              />
+              <Button type="button" variant="outline" size="icon" onClick={() => addCustomModel(newModelName)}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {modelSettings.custom_models.map((model) => (
+              <button
+                key={model}
+                type="button"
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors",
+                  modelSettings.model === model
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background hover:bg-muted"
+                )}
+                onClick={() => setModelSettings((prev) => ({ ...prev, model }))}
+              >
+                <span>{model}</span>
+                <X
+                  className="h-3 w-3 opacity-70 hover:opacity-100"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeCustomModel(model);
+                  }}
+                />
+              </button>
+            ))}
+          </div>
         </div>
+
+        <Separator />
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Temperature</label>
+            {fieldLabel("Temperature", "控制输出随机性，LangChain ChatOpenAI 通用支持，范围 0 到 2。")}
             <Input
               type="number"
               min="0"
@@ -215,27 +415,83 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               onChange={(e) =>
                 setModelSettings((prev) => ({
                   ...prev,
-                  temperature: parseFloat(e.target.value),
+                  temperature: Number(e.target.value),
                 }))
               }
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Max Tokens</label>
+            {fieldLabel("Max Tokens", "限制单次回复长度。部分模型或 Provider 可能忽略该参数，取决于 API 端点。")}
             <Input
               type="number"
               min="1"
-              max="32000"
-              value={modelSettings.maxTokens}
+              value={modelSettings.max_tokens}
               onChange={(e) =>
                 setModelSettings((prev) => ({
                   ...prev,
-                  maxTokens: parseInt(e.target.value),
+                  max_tokens: Number(e.target.value),
                 }))
               }
             />
           </div>
+          <div className="space-y-2">
+            {fieldLabel("Timeout", "请求超时时间，单位秒；会传给 ChatOpenAI 的 request_timeout。")}
+            <Input
+              type="number"
+              min="1"
+              value={modelSettings.timeout}
+              onChange={(e) =>
+                setModelSettings((prev) => ({
+                  ...prev,
+                  timeout: Number(e.target.value),
+                }))
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            {fieldLabel("Max Retries", "请求失败后的重试次数。设置为 0 表示不重试。")}
+            <Input
+              type="number"
+              min="0"
+              value={modelSettings.max_retries}
+              onChange={(e) =>
+                setModelSettings((prev) => ({
+                  ...prev,
+                  max_retries: Number(e.target.value),
+                }))
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            {fieldLabel("Top P", "核采样参数。多数 OpenAI 兼容接口支持，但个别 Provider 可能忽略。")}
+            <Input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={modelSettings.top_p}
+              onChange={(e) =>
+                setModelSettings((prev) => ({
+                  ...prev,
+                  top_p: Number(e.target.value),
+                }))
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              {fieldLabel("Streaming", "开启后使用流式响应；关闭后测试连接仍会使用普通 invoke。")}
+              <p className="text-xs text-muted-foreground">影响下一次模型调用</p>
+            </div>
+            <Switch
+              checked={modelSettings.streaming}
+              onCheckedChange={(checked) =>
+                setModelSettings((prev) => ({ ...prev, streaming: checked }))
+              }
+            />
+          </div>
         </div>
+
       </div>
     </div>
   );
@@ -351,248 +607,472 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     </div>
   );
 
-  // Render appearance settings
-  const renderAppearanceSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium mb-1">外观设置</h3>
-        <p className="text-sm text-muted-foreground">自定义界面主题和显示选项</p>
-      </div>
+  // Render data settings
+  const renderDataSettings = () => {
+    const storagePercent = Math.round((storageUsage.used / storageUsage.total) * 100);
+    const progressColor = storagePercent >= 90
+      ? "bg-destructive"
+      : storagePercent >= 75
+        ? "bg-amber-500"
+        : "bg-primary";
+    const storageCards = [
+      {
+        id: "chat-index",
+        title: "会话索引",
+        path: ".hermes/web/chats.json",
+        size: `${storageUsage.chatIndex} MB`,
+        icon: MessageSquare,
+        action: "重建索引",
+      },
+      {
+        id: "messages",
+        title: "会话消息",
+        path: ".hermes/web/messages",
+        size: `${storageUsage.messages} MB`,
+        icon: ListTree,
+        action: "清理旧会话",
+      },
+      {
+        id: "memory",
+        title: "记忆库",
+        path: ".hermes/memory.db",
+        size: `${storageUsage.memory} MB`,
+        icon: Database,
+        action: "压缩记忆",
+      },
+    ];
+    const filteredConversations = hermesConversations.filter((conversation) => {
+      const matchesQuery = conversation.title.toLowerCase().includes(conversationQuery.toLowerCase());
+      const matchesFilter = conversationFilter === "all"
+        || (conversationFilter === "active" && conversation.message_count > 0)
+        || (conversationFilter === "archived" && conversation.message_count === 0);
+      return matchesQuery && matchesFilter;
+    });
+    const allVisibleSelected = filteredConversations.length > 0
+      && filteredConversations.every((conversation) => selectedConversations.includes(conversation.id));
 
-      <Separator />
+    const handleImportFile = (file: File | undefined) => {
+      if (!file) return;
+      const isSupported = file.name.endsWith(".json") || file.name.endsWith(".md") || file.name.endsWith(".markdown");
+      if (!isSupported) {
+        showToast("只支持 JSON 或 Markdown 文件", "error");
+        return;
+      }
+      setImportFileName(file.name);
+      showToast(`已选择 ${file.name}，导入任务待确认`, "info");
+    };
 
+    const toggleConversation = (conversationId: string) => {
+      setSelectedConversations((prev) =>
+        prev.includes(conversationId)
+          ? prev.filter((id) => id !== conversationId)
+          : [...prev, conversationId]
+      );
+    };
+
+    const toggleAllVisible = () => {
+      setSelectedConversations((prev) => {
+        const visibleIds = filteredConversations.map((conversation) => conversation.id);
+        if (allVisibleSelected) {
+          return prev.filter((id) => !visibleIds.includes(id));
+        }
+        return Array.from(new Set([...prev, ...visibleIds]));
+      });
+    };
+
+    return (
       <div className="space-y-6">
-        <div className="space-y-3">
-          <label className="text-sm font-medium">主题</label>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { id: "light", name: "浅色", icon: "☀️" },
-              { id: "dark", name: "深色", icon: "🌙" },
-              { id: "system", name: "跟随系统", icon: "💻" },
-            ].map((theme) => (
-              <button
-                key={theme.id}
-                onClick={() =>
-                  setAppearanceSettings((prev) => ({ ...prev, theme: theme.id as any }))
-                }
-                className={cn(
-                  "flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all",
-                  appearanceSettings.theme === theme.id
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-muted-foreground"
+        <div>
+          <h3 className="text-lg font-medium mb-1">数据管理</h3>
+          <p className="text-sm text-muted-foreground">管理当前工作区 .hermes 目录下的 Hermes 会话与记忆数据</p>
+        </div>
+
+        <div className="inline-flex rounded-md border bg-muted/30 p-1">
+          {[
+            { id: "overview" as const, label: "存储与备份" },
+            { id: "conversations" as const, label: "对话管理" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setDataTab(tab.id)}
+              className={cn(
+                "rounded px-3 py-1.5 text-sm transition-colors",
+                dataTab === tab.id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {dataTab === "overview" ? (
+          <div className="space-y-6">
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium">存储概览</h4>
+                  <p className="text-xs text-muted-foreground">
+                    .hermes 已使用 {storageUsage.used} MB / {storageUsage.total} MB
+                  </p>
+                </div>
+                <span className={cn(
+                  "rounded px-2 py-1 text-xs font-medium",
+                  storagePercent >= 90
+                    ? "bg-destructive/10 text-destructive"
+                    : storagePercent >= 75
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-muted text-muted-foreground"
+                )}>
+                  {storagePercent}% 已用
+                </span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-muted">
+                <div className={cn("h-full rounded-full transition-all", progressColor)} style={{ width: `${storagePercent}%` }} />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {storageCards.map((item) => (
+                  <div key={item.id} className="rounded-md border bg-background p-3">
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <item.icon className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <span className="text-sm font-medium">{item.title}</span>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{item.path}</p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold">{item.size}</span>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-full"
+                      onClick={() => showToast(`${item.action}任务已创建`, "info")}
+                    >
+                      {item.action}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-md border">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-left"
+                  onClick={() => setCleanupOpen((value) => !value)}
+                >
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">自动清理策略</span>
+                  </div>
+                  {cleanupOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+                {cleanupOpen && (
+                  <div className="space-y-4 border-t p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">自动删除旧会话</p>
+                        <p className="text-xs text-muted-foreground">作用于 .hermes/web/chats.json 和 .hermes/web/messages</p>
+                      </div>
+                      <Switch checked={autoCleanupEnabled} onCheckedChange={setAutoCleanupEnabled} />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">删除 N 天前会话</label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={cleanupDays}
+                          onChange={(event) => setCleanupDays(Number(event.target.value))}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">上下文长度上限</label>
+                        <Input
+                          type="number"
+                          min="16"
+                          value={contextLimit}
+                          onChange={(event) => setContextLimit(Number(event.target.value))}
+                        />
+                      </div>
+                    </div>
+                    <Button type="button" size="sm" onClick={() => showToast("自动清理策略已保存")}>
+                      保存策略
+                    </Button>
+                  </div>
                 )}
-              >
-                <span className="text-2xl">{theme.icon}</span>
-                <span className="text-sm font-medium">{theme.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+              </div>
+            </section>
 
-        <div className="space-y-3">
-          <label className="text-sm font-medium">字体大小</label>
-          <Select
-            value={appearanceSettings.fontSize}
-            onValueChange={(value) =>
-              setAppearanceSettings((prev) => ({ ...prev, fontSize: value as any }))
-            }
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="small">小</SelectItem>
-              <SelectItem value="medium">中</SelectItem>
-              <SelectItem value="large">大</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+            <Separator />
 
-        <Separator />
+            <section className="space-y-4">
+              <div>
+                <h4 className="text-sm font-medium">数据迁移</h4>
+                <p className="text-xs text-muted-foreground">导入和导出 .hermes/web 会话数据，大文件会以后台任务处理</p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div
+                  className="rounded-md border border-dashed p-4"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    handleImportFile(event.dataTransfer.files?.[0]);
+                  }}
+                >
+                  <Upload className="mb-3 h-5 w-5 text-muted-foreground" />
+                  <p className="text-sm font-medium">导入会话 JSON / Markdown</p>
+                  <p className="mt-1 text-xs text-muted-foreground">导入到 .hermes/web，冲突时按所选策略处理</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm hover:bg-accent">
+                      选择文件
+                      <input
+                        type="file"
+                        accept=".json,.md,.markdown"
+                        className="hidden"
+                        onChange={(event) => handleImportFile(event.target.files?.[0])}
+                      />
+                    </label>
+                    <Select value={importConflict} onValueChange={(value) => setImportConflict(value as "skip" | "overwrite")}>
+                      <SelectTrigger className="h-9 w-[120px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="skip">冲突跳过</SelectItem>
+                        <SelectItem value="overwrite">冲突覆盖</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {importFileName && <p className="mt-2 text-xs text-muted-foreground">已选择：{importFileName}</p>}
+                </div>
 
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <label className="text-sm font-medium">显示行号</label>
-              <p className="text-xs text-muted-foreground">在代码块中显示行号</p>
-            </div>
-            <Switch
-              checked={appearanceSettings.showLineNumbers}
-              onCheckedChange={(checked) =>
-                setAppearanceSettings((prev) => ({ ...prev, showLineNumbers: checked }))
-              }
-            />
-          </div>
+                <div className="rounded-md border p-4">
+                  <Download className="mb-3 h-5 w-5 text-muted-foreground" />
+                  <p className="text-sm font-medium">导出 .hermes 会话</p>
+                  <p className="mt-1 text-xs text-muted-foreground">JSON 包含 chats.json 与 messages，Markdown 适合只读归档</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as "json" | "markdown")}>
+                      <SelectTrigger className="h-9 w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="json">JSON 完整数据</SelectItem>
+                        <SelectItem value="markdown">Markdown 只读</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button type="button" size="sm" onClick={() => showToast("导出任务已加入后台队列", "info")}>
+                      开始导出
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <label className="text-sm font-medium">自动换行</label>
-              <p className="text-xs text-muted-foreground">代码超出宽度时自动换行</p>
-            </div>
-            <Switch
-              checked={appearanceSettings.wordWrap}
-              onCheckedChange={(checked) =>
-                setAppearanceSettings((prev) => ({ ...prev, wordWrap: checked }))
-              }
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+            <Separator />
 
-  // Render general settings
-  const renderGeneralSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium mb-1">通用设置</h3>
-        <p className="text-sm text-muted-foreground">语言和其他通用选项</p>
-      </div>
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-medium">备份与恢复</h4>
+                  <p className="text-xs text-muted-foreground">恢复前会自动备份当前 .hermes/web 会话状态</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Select value={backupFrequency} onValueChange={(value) => setBackupFrequency(value as "daily" | "weekly")}>
+                    <SelectTrigger className="h-9 w-[96px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">每天</SelectItem>
+                      <SelectItem value="weekly">每周</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Switch checked={autoBackupEnabled} onCheckedChange={setAutoBackupEnabled} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                {backupHistory.map((backup) => (
+                  <div key={backup.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Archive className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <p className="text-sm font-medium">{backup.name}</p>
+                        <p className="text-xs text-muted-foreground">{backup.time} · {backup.size}</p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (window.confirm("恢复前会先创建当前状态的临时备份，确认继续？")) {
+                          showToast(`正在从 ${backup.time} 的备份恢复`, "info");
+                        }
+                      }}
+                    >
+                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                      恢复
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
 
-      <Separator />
-
-      <div className="space-y-6">
-        <div className="space-y-3">
-          <label className="text-sm font-medium">界面语言</label>
-          <Select defaultValue="zh-CN">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="zh-CN">简体中文</SelectItem>
-              <SelectItem value="en">English</SelectItem>
-              <SelectItem value="zh-TW">繁體中文</SelectItem>
-              <SelectItem value="ja">日本語</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-3">
-          <label className="text-sm font-medium">时区</label>
-          <Select defaultValue="Asia/Shanghai">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Asia/Shanghai">北京时间 (UTC+8)</SelectItem>
-              <SelectItem value="Asia/Tokyo">东京时间 (UTC+9)</SelectItem>
-              <SelectItem value="America/New_York">纽约时间 (UTC-5)</SelectItem>
-              <SelectItem value="Europe/London">伦敦时间 (UTC+0)</SelectItem>
-              <SelectItem value="UTC">UTC</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Separator />
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <label className="text-sm font-medium">自动保存对话</label>
-              <p className="text-xs text-muted-foreground">自动将对话保存到历史记录</p>
-            </div>
-            <Switch defaultChecked />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <label className="text-sm font-medium">发送消息快捷键</label>
-              <p className="text-xs text-muted-foreground">Enter 发送，Shift+Enter 换行</p>
-            </div>
-            <Switch defaultChecked />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Render shortcuts settings
-  const renderShortcutsSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium mb-1">快捷键</h3>
-        <p className="text-sm text-muted-foreground">自定义键盘快捷键</p>
-      </div>
-
-      <Separator />
-
-      <div className="space-y-4">
-        {[
-          { action: "新建对话", shortcut: "Ctrl+N", defaultShortcut: "Ctrl+N" },
-          { action: "发送消息", shortcut: "Enter", defaultShortcut: "Enter" },
-          { action: "换行", shortcut: "Shift+Enter", defaultShortcut: "Shift+Enter" },
-          { action: "搜索对话", shortcut: "Ctrl+K", defaultShortcut: "Ctrl+K" },
-          { action: "打开设置", shortcut: "Ctrl+,", defaultShortcut: "Ctrl+," },
-          { action: "清空对话", shortcut: "Ctrl+Shift+C", defaultShortcut: "Ctrl+Shift+C" },
-          { action: "导出对话", shortcut: "Ctrl+E", defaultShortcut: "Ctrl+E" },
-        ].map((item, idx) => (
-          <div
-            key={idx}
-            className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/50 transition-colors"
-          >
-            <span className="text-sm">{item.action}</span>
-            <div className="flex items-center gap-2">
-              <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono border">
-                {item.shortcut}
-              </kbd>
-              {item.shortcut !== item.defaultShortcut && (
-                <Button variant="ghost" size="sm" className="h-6 text-xs">
-                  重置
+            <section className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+              <div className="mb-3 flex items-start gap-2">
+                <ShieldAlert className="mt-0.5 h-5 w-5 text-destructive" />
+                <div>
+                  <h4 className="text-sm font-semibold text-destructive">危险区域</h4>
+                  <p className="text-xs text-muted-foreground">
+                    清除所有数据会影响 .hermes/web/chats.json、.hermes/web/messages 和会话备份索引。操作前建议先导出备份。
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                <Input
+                  value={deleteConfirmText}
+                  onChange={(event) => setDeleteConfirmText(event.target.value)}
+                  placeholder="输入 DELETE-HERMES-DATA 以确认"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={deleteConfirmText !== "DELETE-HERMES-DATA"}
+                  onClick={() => {
+	                    if (window.confirm("二次确认：这会清除 .hermes/web 下的会话数据。确认继续？")) {
+                      setDeleteConfirmText("");
+                      showToast("清除任务已创建", "info");
+                    }
+                  }}
+                >
+                  清除所有数据
                 </Button>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3 border-destructive/30 text-destructive hover:text-destructive"
+                onClick={() => showToast("备份导出任务已加入后台队列", "info")}
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                先导出备份
+              </Button>
+            </section>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[240px] flex-1">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={conversationQuery}
+                  onChange={(event) => setConversationQuery(event.target.value)}
+	                  placeholder="搜索 .hermes 会话"
+                  className="pl-9"
+                />
+              </div>
+              <Select value={conversationFilter} onValueChange={(value) => setConversationFilter(value as "all" | "active" | "archived")}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部</SelectItem>
+	                  <SelectItem value="active">有消息</SelectItem>
+	                  <SelectItem value="archived">空会话</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={selectedConversations.length === 0}
+	                onClick={() => showToast(`已创建 ${selectedConversations.length} 个 .hermes 会话的导出任务`, "info")}
+              >
+                批量导出
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                disabled={selectedConversations.length === 0}
+                onClick={() => {
+	                  if (window.confirm(`确认删除选中的 ${selectedConversations.length} 个 .hermes 会话？`)) {
+	                    const selectedIds = [...selectedConversations];
+	                    Promise.all(selectedIds.map((chatId) => deleteChat(chatId)))
+	                      .then(() => {
+	                        setHermesConversations((prev) => prev.filter((conversation) => !selectedIds.includes(conversation.id)));
+	                        setSelectedConversations([]);
+	                        showToast("已从 .hermes/web 删除选中的会话", "success");
+	                      })
+	                      .catch(() => showToast("删除 .hermes 会话失败", "error"));
+	                  }
+                }}
+              >
+                批量删除
+              </Button>
+            </div>
+
+            <div className="overflow-hidden rounded-md border">
+              <table className="w-full table-fixed text-sm">
+                <colgroup>
+                  <col className="w-10" />
+                  <col />
+                  <col className="w-28" />
+                  <col className="w-20" />
+                  <col className="w-20" />
+                </colgroup>
+                <thead className="bg-muted/40 text-xs font-medium text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="px-3 py-2 text-left align-middle">
+                      <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
+                    </th>
+	                    <th className="px-3 py-2 text-left align-middle">.hermes 会话</th>
+                    <th className="px-3 py-2 text-left align-middle">更新时间</th>
+	                    <th className="px-3 py-2 text-left align-middle">消息数</th>
+	                    <th className="px-3 py-2 text-left align-middle">状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredConversations.map((conversation) => (
+                    <tr key={conversation.id} className="border-b last:border-b-0">
+                      <td className="px-3 py-2 align-middle">
+                        <input
+                          type="checkbox"
+                          checked={selectedConversations.includes(conversation.id)}
+                          onChange={() => toggleConversation(conversation.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate font-medium">{conversation.title}</span>
+                        </div>
+                      </td>
+	                      <td className="px-3 py-2 align-middle text-xs text-muted-foreground">
+	                        {new Date(conversation.updated_at).toLocaleString()}
+	                      </td>
+	                      <td className="px-3 py-2 align-middle text-xs text-muted-foreground">{conversation.message_count}</td>
+	                      <td className="px-3 py-2 align-middle">
+	                        <span className="inline-flex min-w-12 justify-center rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+	                          {conversation.message_count > 0 ? "有消息" : "空会话"}
+	                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredConversations.length === 0 && (
+                <div className="px-3 py-8 text-center text-sm text-muted-foreground">没有匹配的对话</div>
               )}
             </div>
           </div>
-        ))}
+        )}
       </div>
-    </div>
-  );
-
-  // Render data settings
-  const renderDataSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium mb-1">数据管理</h3>
-        <p className="text-sm text-muted-foreground">管理你的数据和存储</p>
-      </div>
-
-      <Separator />
-
-      <div className="space-y-6">
-        <div className="space-y-3">
-          <h4 className="text-sm font-medium">存储使用情况</h4>
-          <div className="p-4 bg-muted/50 rounded-lg">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm">已使用</span>
-              <span className="text-sm font-medium">128 MB / 1 GB</span>
-            </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full" style={{ width: "12.5%" }} />
-            </div>
-          </div>
-        </div>
-
-        <Separator />
-
-        <div className="space-y-3">
-          <h4 className="text-sm font-medium">数据操作</h4>
-          <div className="flex flex-col gap-2">
-            <Button variant="outline" className="justify-start">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              导出所有对话
-            </Button>
-            <Button variant="outline" className="justify-start">
-              <Database className="h-4 w-4 mr-2" />
-              备份设置
-            </Button>
-            <Button variant="outline" className="justify-start text-destructive hover:text-destructive">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              清除所有数据
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderContent = () => {
     switch (activeCategory) {
@@ -600,12 +1080,6 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         return renderModelSettings();
       case "permissions":
         return renderPermissionSettings();
-      case "appearance":
-        return renderAppearanceSettings();
-      case "general":
-        return renderGeneralSettings();
-      case "shortcuts":
-        return renderShortcutsSettings();
       case "data":
         return renderDataSettings();
       default:
@@ -616,6 +1090,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   if (!isOpen) return null;
 
   return (
+    <TooltipProvider delayDuration={120}>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex overflow-hidden">
         {/* Sidebar */}
@@ -680,10 +1155,23 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             </div>
           </div>
           <ScrollArea className="flex-1 p-6">
-            <div className="max-w-2xl">{renderContent()}</div>
+            <div className="max-w-4xl">{renderContent()}</div>
           </ScrollArea>
         </div>
       </div>
+      {toast && (
+        <div
+          className={cn(
+            "fixed right-6 top-6 z-[60] rounded-md border bg-background px-4 py-3 text-sm shadow-lg",
+            toast.type === "success" && "border-green-200 text-green-700",
+            toast.type === "error" && "border-destructive/30 text-destructive",
+            toast.type === "info" && "border-border text-foreground"
+          )}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
+    </TooltipProvider>
   );
 }

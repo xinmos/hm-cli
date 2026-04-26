@@ -33,7 +33,7 @@ if check_port 8000; then
     echo "⚠️ 端口 8000 已被占用，可能是后端已在运行"
 else
     # 使用 nohup 在后台运行
-    nohup bash -c "cd '$PROJECT_ROOT' && ./.venv/bin/python -m uvicorn web.backend.main:app --reload --port 8000 --host 0.0.0.0" > "$BACKEND_LOG" 2>&1 &
+    nohup bash -c "cd '$PROJECT_ROOT' && uv run python -m uvicorn web.backend.main:app --reload --port 8000 --host 0.0.0.0" > "$BACKEND_LOG" 2>&1 &
     echo "✅ 后端服务已启动 (PID: $!)"
     echo "📄 日志文件: .hermes/logs/web-backend.log"
 fi
@@ -95,6 +95,6 @@ echo ""
 echo "📋 常用命令:"
 echo "   查看后端日志: tail -f .hermes/logs/web-backend.log"
 echo "   查看前端日志: tail -f .hermes/logs/web-frontend.log"
-echo "   停止所有服务: pkill -f 'python -m uvicorn web.backend.main:app' && pkill -f 'next dev'"
+echo "   停止所有服务: pkill -f 'uvicorn web.backend.main:app' && pkill -f 'next dev'"
 echo ""
 echo "═══════════════════════════════════════════"

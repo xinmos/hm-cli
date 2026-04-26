@@ -1,3 +1,4 @@
+import subprocess
 from datetime import datetime
 
 from hermes.app.settings import Settings
@@ -14,6 +15,7 @@ class ProjectService:
                 "id": project_name,
                 "name": project_name,
                 "path": str(self._settings.workdir),
+                "branch": self._get_branch_name(),
                 "created_at": datetime.now(),
                 "chat_count": 0,
             }
@@ -27,6 +29,25 @@ class ProjectService:
             "id": project_id,
             "name": project_id,
             "path": str(self._settings.workdir),
+            "branch": self._get_branch_name(),
             "created_at": datetime.now(),
             "chat_count": 0,
         }
+
+    def _get_branch_name(self) -> str:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self._settings.workdir,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        except Exception:
+            return "main"
+
+        branch = result.stdout.strip()
+        if result.returncode != 0 or not branch:
+            return "main"
+        return branch

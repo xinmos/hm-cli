@@ -73,6 +73,24 @@ class JsonChatStore:
         if legacy_messages_path.exists():
             legacy_messages_path.unlink()
 
+    def rename_chat(self, chat_id: str, title: str) -> ChatSummary | None:
+        chats = self.list_chats()
+        updated_chat: ChatSummary | None = None
+
+        for chat in chats:
+            if chat.id != chat_id:
+                continue
+            chat.title = title
+            chat.updated_at = datetime.now().isoformat()
+            updated_chat = chat
+            break
+
+        if updated_chat is None:
+            return None
+
+        self._write_chats(chats)
+        return updated_chat
+
     def _ensure_dirs(self) -> None:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._messages_dir.mkdir(parents=True, exist_ok=True)

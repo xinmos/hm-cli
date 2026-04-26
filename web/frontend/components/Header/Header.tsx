@@ -1,8 +1,8 @@
 "use client";
 
-import * as React from "react";
-import { Menu, Check, ChevronDown, Wifi, WifiOff, RefreshCw } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Code2, Copy, ExternalLink, Menu } from "lucide-react";
+import type { Message } from "@/app/page";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,28 +20,118 @@ import {
 interface HeaderProps {
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
+  onToggleWorkspace: () => void;
   title: string;
-  connectionStatus: "connecting" | "connected" | "disconnected";
+  messages: Message[];
 }
 
-const models = [
-  { id: "doubao-seed-2.0", name: "Doubao-Seed-2.0", provider: "bytedance" },
-  { id: "gpt-4", name: "GPT-4", provider: "openai" },
-  { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", provider: "openai" },
-];
+const ROLE_LABELS: Record<Message["role"], string> = {
+  user: "用户",
+  assistant: "Hermes",
+  system: "系统",
+};
+
+function getLocalDateStamp(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function sanitizeFilenamePart(value: string): string {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
+}
+
+function buildMarkdown(title: string, messages: Message[]): string {
+  const normalizedTitle = title.trim() || "未命名对话";
+  const exportedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+  const sections = messages.map((message, index) => {
+    const label = ROLE_LABELS[message.role] || message.role;
+    const timestamp = message.created_at
+      ? new Date(message.created_at).toLocaleString("zh-CN", { hour12: false })
+      : "";
+    const heading = `## ${index + 1}. ${label}${timestamp ? ` (${timestamp})` : ""}`;
+    const content = message.content.trim() || "_空消息_";
+
+    return `${heading}\n\n${content}`;
+  });
+
+  return [`# ${normalizedTitle}`, "", `> 导出时间：${exportedAt}`, "", "---", "", ...sections].join("\n");
+}
+
+async function copyMarkdownToClipboard(markdown: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(markdown);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = markdown;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
 
 export function Header({
   isSidebarOpen,
   onToggleSidebar,
+  onToggleWorkspace,
   title,
-  connectionStatus,
+  messages,
 }: HeaderProps) {
-  const [selectedModel, setSelectedModel] = React.useState(models[0]);
+  const [successAction, setSuccessAction] = useState<"export" | "copy" | null>(null);
+  const hasMessages = messages.length > 0;
+  const markdown = useMemo(() => buildMarkdown(title, messages), [title, messages]);
+
+  useEffect(() => {
+    if (!successAction) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setSuccessAction(null), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [successAction]);
+
+  const handleExport = () => {
+    if (!hasMessages) {
+      return;
+    }
+
+    const filenameTitle = sanitizeFilenamePart(title) || "未命名对话";
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = `${filenameTitle}_${getLocalDateStamp()}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setSuccessAction("export");
+  };
+
+  const handleCopy = async () => {
+    if (!hasMessages) {
+      return;
+    }
+
+    await copyMarkdownToClipboard(markdown);
+    setSuccessAction("copy");
+  };
 
   return (
     <TooltipProvider>
       <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-background">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <Button
             variant="ghost"
             size="icon"
@@ -51,73 +141,58 @@ export function Header({
             <Menu className="h-5 w-5" />
           </Button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <span className="font-semibold text-sm">Hermes</span>
             <span className="text-muted-foreground">|</span>
-            <span className="text-sm text-muted-foreground">{title}</span>
+            <span className="truncate text-sm text-muted-foreground">{title}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Connection Status */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50">
-                {connectionStatus === "connected" ? (
-                  <Wifi className="h-3.5 w-3.5 text-green-500" />
-                ) : connectionStatus === "connecting" ? (
-                  <RefreshCw className="h-3.5 w-3.5 text-yellow-500 animate-spin" />
-                ) : (
-                  <WifiOff className="h-3.5 w-3.5 text-red-500" />
-                )}
-                <span className="text-xs text-muted-foreground">
-                  {connectionStatus === "connected"
-                    ? "已连接"
-                    : connectionStatus === "connecting"
-                    ? "连接中..."
-                    : "已断开"}
-                </span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>
-                {connectionStatus === "connected"
-                  ? "WebSocket 连接正常"
-                  : connectionStatus === "connecting"
-                  ? "正在建立连接..."
-                  : "连接已断开，正在尝试重连"}
-              </p>
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Model Selector */}
+        <div className="flex shrink-0 items-center gap-2">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-1">
-                <span className="text-sm">{selectedModel.name}</span>
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {models.map((model) => (
-                <DropdownMenuItem
-                  key={model.id}
-                  onClick={() => setSelectedModel(model)}
-                  className="flex items-center justify-between"
-                >
-                  <div className="flex flex-col">
-                    <span className="font-medium">{model.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {model.provider}
-                    </span>
-                  </div>
-                  {selectedModel.id === model.id && (
-                    <Check className="h-4 w-4" />
-                  )}
-                </DropdownMenuItem>
-              ))}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild disabled={!hasMessages}>
+                  <button
+                    type="button"
+                    aria-label="导出对话"
+                    disabled={!hasMessages}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-transparent text-[#6b7280] transition-all duration-150 ease-in-out hover:bg-[rgba(0,0,0,0.05)] hover:text-[#111827] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#6b7280]"
+                  >
+                    {successAction ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <ExternalLink className="h-4 w-4" />
+                    )}
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{successAction === "copy" ? "已复制" : successAction === "export" ? "已导出" : "导出对话"}</p>
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExport}>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                导出 Markdown
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCopy}>
+                <Copy className="mr-2 h-4 w-4" />
+                复制 Markdown
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={onToggleWorkspace}>
+                <Code2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>打开工作区编辑器</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </header>
     </TooltipProvider>

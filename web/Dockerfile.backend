@@ -1,0 +1,15 @@
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --extra web --no-install-project
+
+COPY hermes ./hermes
+COPY web/backend ./web/backend
+COPY cli.py ./cli.py
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+
+CMD ["uv", "run", "python", "-m", "uvicorn", "web.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

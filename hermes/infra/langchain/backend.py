@@ -16,18 +16,28 @@ class LangChainOpenAIBackend(AgentBackend):
         base_url: str,
         model_name: str,
         temperature: float = 0.7,
+        max_tokens: int | None = None,
+        timeout: int | None = None,
+        max_retries: int = 2,
+        top_p: float = 1.0,
+        streaming: bool = True,
     ):
         self._model = ChatOpenAI(
             api_key=api_key,
             base_url=base_url,
             model=model_name,
             temperature=temperature,
-            streaming=True,
-            stream_usage=True
+            max_tokens=max_tokens,
+            request_timeout=timeout,
+            max_retries=max_retries,
+            top_p=top_p,
+            streaming=streaming,
+            stream_usage=streaming,
         )
         self._last_token_usage = 0
 
     def stream(self, messages: list[Message], tools: list[Any] | None = None) -> Iterable[AgentEvent]:
+        self._last_token_usage = 0
         lc_messages = self._to_langchain_messages(messages)
 
         if tools:
@@ -43,7 +53,7 @@ class LangChainOpenAIBackend(AgentBackend):
                     )
 
                 if isinstance(msg, AIMessageChunk):
-                    content = msg.content
+                    content = self._coerce_content_to_text(msg.content)
                     if content:
                         yield AgentEvent(event_type="content", data={"content": content})
 
@@ -59,7 +69,7 @@ class LangChainOpenAIBackend(AgentBackend):
                             yield AgentEvent(event_type="token_usage", data={"tokens": delta})
         else:
             for chunk in self._model.stream(lc_messages):
-                content = chunk.content
+                content = self._coerce_content_to_text(chunk.content)
                 if content:
                     yield AgentEvent(event_type="content", data={"content": content})
 
@@ -84,6 +94,31 @@ class LangChainOpenAIBackend(AgentBackend):
             elif msg.role == "assistant":
                 result.append(AIMessage(content=msg.content))
         return result
+
+    def _coerce_content_to_text(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if not isinstance(item, dict):
+                    continue
+
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+
+                # Some providers nest text under content fragments.
+                if item.get("type") == "text":
+                    nested_text = item.get("content")
+                    if isinstance(nested_text, str):
+                        parts.append(nested_text)
+            return "".join(parts)
+        return ""
 
     def _format_tool_display(self, tool_name: str, args: dict) -> str:
         """Format tool call for display in a concise way"""

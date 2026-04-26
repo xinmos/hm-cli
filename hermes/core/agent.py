@@ -89,6 +89,24 @@ class AgentSession:
         """获取当前消息列表的副本"""
         return list(self._messages)
 
+    def load_history(self, history: list[Message]) -> None:
+        system_msg: Message | None = None
+        for msg in self._messages:
+            if msg.role == "system":
+                system_msg = msg
+                break
+
+        self._messages = []
+        if system_msg:
+            self._messages.append(system_msg)
+
+        for msg in history:
+            if msg.role == "system":
+                continue
+            self._messages.append(msg)
+
+        self._total_tokens = 0
+
     def reset(self) -> None:
         system_msg: Message | None = None
         for msg in self._messages:
