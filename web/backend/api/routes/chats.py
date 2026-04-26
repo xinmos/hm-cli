@@ -172,7 +172,10 @@ async def stream_chat_message(
 
     async def event_stream() -> AsyncIterator[bytes]:
         interaction = WebInteractionPort()
-        control_plane, runtime = services.create_control_plane(interaction_port=interaction)
+        control_plane, runtime = services.create_control_plane(
+            interaction_port=interaction,
+            model_name=payload.model,
+        )
         control_plane.agent.load_history(history)
 
         loop = asyncio.get_running_loop()
@@ -212,7 +215,7 @@ async def stream_chat_message(
                 "type": "status",
                 "tokens_used": control_plane.agent.get_token_count(),
                 "tokens_total": services.settings.context_window,
-                "model": services.settings.model_name,
+                "model": control_plane.settings.model_name,
             })
         except asyncio.CancelledError:
             worker.cancel()

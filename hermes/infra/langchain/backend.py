@@ -16,14 +16,23 @@ class LangChainOpenAIBackend(AgentBackend):
         base_url: str,
         model_name: str,
         temperature: float = 0.7,
+        max_tokens: int | None = None,
+        timeout: int | None = None,
+        max_retries: int = 2,
+        top_p: float = 1.0,
+        streaming: bool = True,
     ):
         self._model = ChatOpenAI(
             api_key=api_key,
             base_url=base_url,
             model=model_name,
             temperature=temperature,
-            streaming=True,
-            stream_usage=True
+            max_tokens=max_tokens,
+            request_timeout=timeout,
+            max_retries=max_retries,
+            top_p=top_p,
+            streaming=streaming,
+            stream_usage=streaming,
         )
         self._last_token_usage = 0
 

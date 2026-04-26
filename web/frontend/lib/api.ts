@@ -60,6 +60,35 @@ export interface SkillMarketSource {
   url: string;
 }
 
+export interface ModelConfig {
+  provider: string;
+  api_key: string | null;
+  base_url: string | null;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  timeout: number;
+  max_retries: number;
+  top_p: number;
+  streaming: boolean;
+  custom_models: string[];
+}
+
+export interface ModelConfigResponse {
+  config: ModelConfig;
+  saved: Record<string, unknown>;
+  env: Partial<ModelConfig>;
+  env_masked: Partial<ModelConfig>;
+}
+
+export interface ModelSummary {
+  id: string;
+  name: string;
+  provider: string;
+  context_size: number;
+  is_available: boolean;
+}
+
 function normalizeSkillList(data: unknown): SkillSummary[] {
   if (Array.isArray(data)) {
     return data as SkillSummary[];
@@ -262,6 +291,58 @@ export async function setLocalSkillEnabled(path: string, enabled: boolean): Prom
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) throw new Error("Failed to update skill state");
+  return res.json();
+}
+
+export async function fetchModelConfig(): Promise<ModelConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/config`);
+  if (!res.ok) throw new Error("Failed to fetch model config");
+  return res.json();
+}
+
+export async function fetchModels(): Promise<ModelSummary[]> {
+  const res = await fetch(`${API_BASE}/api/models`);
+  if (!res.ok) throw new Error("Failed to fetch models");
+  return res.json();
+}
+
+export async function saveModelConfig(config: ModelConfig): Promise<ModelConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error("Failed to save model config");
+  return res.json();
+}
+
+export async function testModelConfig(config: ModelConfig): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${API_BASE}/api/models/config/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || "Failed to test model config");
+  }
+  return data;
+}
+
+export async function exportModelEnv(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/models/config/export-env`);
+  if (!res.ok) throw new Error("Failed to export model env");
+  const data = await res.json();
+  return data.content;
+}
+
+export async function importModelEnv(content: string): Promise<ModelConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/config/import-env`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to import model env");
   return res.json();
 }
 

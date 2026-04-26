@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Hermes - AI Assistant",
-  description: "Web interface for Hermes CLI",
+  title: "Hermes - Personal Agent",
+  description: "A personal agent interface for Hermes",
 };
 
 export default function RootLayout({

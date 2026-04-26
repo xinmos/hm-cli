@@ -39,7 +39,7 @@ app.add_middleware(
 )
 
 app.include_router(chats.router, prefix="/api", tags=["chats"])
-app.include_router(models.router, prefix="/api", tags=["models"])
+app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(workspace.router, prefix="/api/workspace", tags=["workspace"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])

@@ -209,6 +209,11 @@ def assemble_control_plane(
         base_url=settings.openai_base_url,
         model_name=settings.model_name,
         temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+        timeout=settings.timeout,
+        max_retries=settings.max_retries,
+        top_p=settings.top_p,
+        streaming=settings.streaming,
     )
 
     tool_catalog: ToolCatalog = LangChainToolCatalog(

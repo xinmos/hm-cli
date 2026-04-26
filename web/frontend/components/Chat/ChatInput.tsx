@@ -36,7 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ChatAttachment, WorkspaceInfo } from "@/lib/api";
+import { fetchModels, type ChatAttachment, type ModelSummary, type WorkspaceInfo } from "@/lib/api";
 
 interface ChatInputProps {
   onSend: (message: string, options: { permissions: string; model: string; attachments?: ChatAttachment[] }) => void;
@@ -54,11 +54,6 @@ const permissions = [
   { id: "full", name: "完全访问权限", icon: Shield },
 ];
 
-const defaultModels = [
-  { id: "doubao-seed-2.0", name: "Doubao-Seed-2.0" },
-  { id: "gpt-4", name: "GPT-4" },
-];
-
 export function ChatInput({
   onSend,
   disabled,
@@ -68,24 +63,35 @@ export function ChatInput({
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [selectedPermission, setSelectedPermission] = useState(permissions[0]);
+  const [modelOptions, setModelOptions] = useState<ModelSummary[]>([]);
   const availableModels = useMemo(() => {
     const configuredModel = workspaceInfo?.model
       ? [{ id: workspaceInfo.model, name: workspaceInfo.model }]
       : [];
-    return [...configuredModel, ...defaultModels].filter(
+    const fetchedModels = modelOptions.map((model) => ({ id: model.id, name: model.name }));
+    return [...configuredModel, ...fetchedModels].filter(
       (model, index, all) => all.findIndex((item) => item.id === model.id) === index
     );
-  }, [workspaceInfo]);
+  }, [modelOptions, workspaceInfo]);
   const [selectedModel, setSelectedModel] = useState(availableModels[0]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setSelectedModel(availableModels[0]);
+    if (availableModels.length === 0) return;
+    setSelectedModel((current) =>
+      availableModels.some((model) => model.id === current?.id) ? current : availableModels[0]
+    );
   }, [availableModels]);
 
+  useEffect(() => {
+    fetchModels()
+      .then(setModelOptions)
+      .catch((error) => console.error("Failed to load models:", error));
+  }, []);
+
   const handleSubmit = useCallback(() => {
-    if ((!input.trim() && attachments.length === 0) || disabled) return;
+    if ((!input.trim() && attachments.length === 0) || disabled || !selectedModel) return;
 
     onSend(input.trim(), {
       permissions: selectedPermission.id,
@@ -272,7 +278,7 @@ export function ChatInput({
             <div className="flex items-center gap-0.5">
               {/* Model selector */}
               <Select
-                value={selectedModel.id}
+                value={selectedModel?.id || ""}
                 onValueChange={(value) => {
                   const model = availableModels.find((m) => m.id === value);
                   if (model) setSelectedModel(model);
@@ -315,7 +321,7 @@ export function ChatInput({
                 size="icon"
                 className="ml-0.5 h-7 w-7 rounded-full bg-neutral-700 text-white shadow-none hover:bg-neutral-800 disabled:opacity-40"
                 onClick={handleSubmit}
-                disabled={(!input.trim() && attachments.length === 0) || disabled}
+                disabled={(!input.trim() && attachments.length === 0) || disabled || !selectedModel}
               >
                 <Send className="h-3.5 w-3.5" />
               </Button>

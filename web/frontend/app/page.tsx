@@ -356,6 +356,7 @@ export default function Home() {
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           onToggleWorkspace={() => setIsWorkspaceOpen((prev) => !prev)}
           title={currentChatId ? chats.find((c) => c.id === currentChatId)?.title || "Chat" : "New Chat"}
+          messages={messages}
         />
 
         <ChatArea

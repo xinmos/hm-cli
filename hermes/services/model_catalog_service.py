@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from hermes.app.settings import Settings
+from hermes.services.llm_config_service import LLMConfigService
 
 
 class ModelCatalogService:
-    def __init__(self, settings: Settings):
-        self._settings = settings
+    def __init__(self, llm_config: LLMConfigService):
+        self._llm_config = llm_config
 
     def list_models(self) -> list[dict[str, str | int | bool]]:
-        active_model = self._settings.model_name
+        config = self._llm_config.get_effective_config()
+        models = config.custom_models or [config.model]
         return [
             {
-                "id": active_model,
-                "name": active_model,
-                "provider": "configured",
-                "context_size": self._settings.context_window,
+                "id": model,
+                "name": model,
+                "provider": "custom" if model != config.model else config.provider,
+                "context_size": 0,
                 "is_available": True,
             }
+            for model in models
         ]

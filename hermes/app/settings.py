@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
+from hermes.app.llm_config import LLMConfig, load_effective_llm_config
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,11 @@ class Settings:
     model_name: str
     temperature: float
     max_tokens: int
+    timeout: int
+    max_retries: int
+    top_p: float
+    streaming: bool
+    custom_models: list[str]
     workdir: Path
     max_output_size: int
     max_output_lines: int
@@ -37,13 +44,19 @@ class Settings:
             load_dotenv()
 
         workdir = Path(os.getenv("HERMES_WORKDIR", ".")).resolve()
+        llm_config = load_effective_llm_config(workdir)
 
         return cls(
-            openai_api_key=os.getenv("OPENAI_API_KEY", "sk-no-key-required"),
-            openai_base_url=os.getenv("OPENAI_BASE_URL", "http://192.168.1.7:8081/v1"),
-            model_name=os.getenv("MODEL_NAME", "llama-model"),
-            temperature=float(os.getenv("TEMPERATURE", "0.7")),
-            max_tokens=int(os.getenv("MAX_TOKENS", "2048")),
+            openai_api_key=llm_config.api_key or "",
+            openai_base_url=llm_config.base_url or "",
+            model_name=llm_config.model,
+            temperature=llm_config.temperature,
+            max_tokens=llm_config.max_tokens,
+            timeout=llm_config.timeout,
+            max_retries=llm_config.max_retries,
+            top_p=llm_config.top_p,
+            streaming=llm_config.streaming,
+            custom_models=llm_config.custom_models or [],
             workdir=workdir,
             max_output_size=int(os.getenv("HERMES_MAX_OUTPUT", "50000")),
             max_output_lines=int(os.getenv("HERMES_MAX_LINES", "500")),
@@ -62,6 +75,11 @@ class Settings:
             "model_name": self.model_name,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "top_p": self.top_p,
+            "streaming": self.streaming,
+            "custom_models": self.custom_models,
             "workdir": str(self.workdir),
             "max_output_size": self.max_output_size,
             "max_output_lines": self.max_output_lines,
@@ -72,3 +90,19 @@ class Settings:
             "tasks_path": str(self.tasks_path),
             "context_window": self.context_window,
         }
+
+    def with_llm_config(self, config: LLMConfig) -> "Settings":
+        normalized = config.normalized()
+        return replace(
+            self,
+            openai_api_key=normalized.api_key or "",
+            openai_base_url=normalized.base_url or "",
+            model_name=normalized.model,
+            temperature=normalized.temperature,
+            max_tokens=normalized.max_tokens,
+            timeout=normalized.timeout,
+            max_retries=normalized.max_retries,
+            top_p=normalized.top_p,
+            streaming=normalized.streaming,
+            custom_models=normalized.custom_models or [],
+        )

@@ -15,9 +15,17 @@ import {
   Search,
   Globe,
   Terminal,
+  Check,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Message } from "@/app/page";
 
 interface MessageListProps {
@@ -72,6 +80,23 @@ function ThinkingStatus({ currentAction }: { currentAction?: string }) {
       </div>
     </div>
   );
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 function MarkdownMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
@@ -135,6 +160,26 @@ function MarkdownMessage({ content, isStreaming }: { content: string; isStreamin
 function MessageItem({ message }: { message: Message }) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
+  const [isCopied, setIsCopied] = useState(false);
+  const canCopy = message.content.trim().length > 0;
+
+  useEffect(() => {
+    if (!isCopied) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => setIsCopied(false), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [isCopied]);
+
+  const handleCopy = async () => {
+    if (!canCopy) {
+      return;
+    }
+
+    await copyTextToClipboard(message.content);
+    setIsCopied(true);
+  };
 
   return (
     <div
@@ -190,6 +235,29 @@ function MessageItem({ message }: { message: Message }) {
               <MarkdownMessage content={message.content} isStreaming={message.isStreaming} />
             )}
           </div>
+
+          <div className="mt-2 flex justify-end">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="复制这条消息"
+                  disabled={!canCopy}
+                  onClick={handleCopy}
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-transparent text-[#6b7280] opacity-70 transition-all duration-150 ease-in-out hover:bg-[rgba(0,0,0,0.05)] hover:text-[#111827] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#6b7280]"
+                >
+                  {isCopied ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{isCopied ? "已复制" : "复制"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
       </div>
     </div>
@@ -205,18 +273,20 @@ export function MessageList({ messages, bottomRef }: MessageListProps) {
         </div>
         <h2 className="text-xl font-semibold mb-2">欢迎使用 Hermes</h2>
         <p className="text-muted-foreground max-w-sm">
-          我是你的 AI 编程助手。我可以帮你写代码、调试、解释概念，或者讨论技术方案。
+          我是一个面向个人工作的智能 Agent，正在朝你的 Jarvis 进化：理解目标、调用技能、管理上下文，并协助你推进复杂任务。
         </p>
       </div>
     );
   }
 
   return (
-    <div className="divide-y divide-border/50">
-      {messages.map((message) => (
-        <MessageItem key={message.id} message={message} />
-      ))}
-      <div ref={bottomRef} className="h-0" />
-    </div>
+    <TooltipProvider delayDuration={120}>
+      <div className="divide-y divide-border/50">
+        {messages.map((message) => (
+          <MessageItem key={message.id} message={message} />
+        ))}
+        <div ref={bottomRef} className="h-0" />
+      </div>
+    </TooltipProvider>
   );
 }

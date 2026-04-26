@@ -143,7 +143,7 @@ class WebChatSession:
             "type": "status",
             "tokens_used": self._control_plane.agent.get_token_count(),
             "tokens_total": self._services.settings.context_window,
-            "model": self._services.settings.model_name,
+            "model": self._services.llm_config.get_effective_config().model,
         })
 
     async def close(self) -> None:

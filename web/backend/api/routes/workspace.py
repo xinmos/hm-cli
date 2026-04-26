@@ -77,7 +77,7 @@ async def get_workspace(request: Request) -> WorkspaceResponse:
         project_name=project["name"],
         project_path=project["path"],
         branch=project.get("branch", "main"),
-        model=services.settings.model_name,
+        model=services.llm_config.get_effective_config().model,
         context_window=services.settings.context_window,
     )
 
