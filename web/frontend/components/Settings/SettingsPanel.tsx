@@ -53,6 +53,7 @@ import {
   fetchChats,
   fetchModelConfig,
   fetchWikiConfig,
+  initializeWiki,
   saveModelConfig,
   saveWikiConfig,
   type ModelConfig,
@@ -174,6 +175,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [toast, setToast] = useState<ToastState>(null);
   const [wikiConfig, setWikiConfig] = useState<WikiConfig | null>(null);
   const [wikiPathDraft, setWikiPathDraft] = useState(".hermes/llm-wiki");
+  const [isInitializingWiki, setIsInitializingWiki] = useState(false);
 
   const [dataTab, setDataTab] = useState<DataTab>("overview");
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -328,9 +330,41 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     window.setTimeout(() => setToast(null), 2600);
   };
 
+  const handleInitializeWiki = async () => {
+    const path = wikiPathDraft.trim();
+    if (!path) {
+      showToast("先填写一个知识库目录", "error");
+      return;
+    }
+
+    setIsInitializingWiki(true);
+    setSaveStatus("idle");
+    try {
+      const response = await initializeWiki(path);
+      setWikiConfig(response);
+      setWikiPathDraft(response.path);
+      setSaveStatus("success");
+      const createdCount =
+        (response.init_result?.created_dirs.length || 0) +
+        (response.init_result?.created_files.length || 0);
+      showToast(createdCount > 0 ? "知识库已初始化" : "知识库结构已就绪");
+    } catch (error) {
+      console.error("Failed to initialize llm-wiki:", error);
+      setSaveStatus("error");
+      showToast("初始化失败，请检查目录权限", "error");
+    } finally {
+      setIsInitializingWiki(false);
+    }
+  };
+
   const renderKnowledgeSettings = () => {
-    const isDefaultPath = wikiConfig && wikiPathDraft.trim() === wikiConfig.default_path;
+    const draftPath = wikiPathDraft.trim();
+    const isDefaultPath = wikiConfig && draftPath === wikiConfig.default_path;
     const resolvedPath = wikiConfig?.effective_path || wikiPathDraft || ".hermes/llm-wiki";
+    const pathChanged = wikiConfig ? draftPath !== wikiConfig.path : false;
+    const needsInitialization = pathChanged || !wikiConfig?.is_initialized;
+    const statusTone = wikiConfig?.is_initialized && !pathChanged ? "text-emerald-600" : "text-amber-600";
+    const missingPreview = wikiConfig?.missing_items.slice(0, 4) || [];
 
     return (
       <div className="space-y-6">
@@ -346,17 +380,45 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           <div className="rounded-md border bg-muted/20 p-4 space-y-2">
             <div className="flex items-center gap-2 text-sm font-medium">
               <BookOpen className="h-4 w-4 text-muted-foreground" />
-              <span>什么是 llm-wiki？</span>
+              <span>LLM Wiki 知识库</span>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              llm-wiki 是一个基于 Obsidian 的 LLM 知识库系统。你可以将原始资料放入 raw/sources/，
-              AI 会自动整理、归纳并生成结构化的 wiki 页面到 wiki/ 目录中，支持实体、概念、合成分类管理。
+              Karpathy 提出的 LLM Wiki，是让模型把原始资料编译成可持续更新的 Markdown 知识库。它会沉淀摘要、概念和关联，让后续问答基于逐步生长的 wiki。
             </p>
+            <div className="grid gap-2 pt-2 md:grid-cols-3">
+              <div className="rounded-md border bg-background/70 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                  <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>收集资料</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  用 Obsidian 打开知识库目录，把文章、笔记或摘录放进 raw/sources/。
+                </p>
+              </div>
+              <div className="rounded-md border bg-background/70 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>让 AI 处理</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  在聊天里说“处理知识库里的新文章”，Hermes 会整理到 wiki/。
+                </p>
+              </div>
+              <div className="rounded-md border bg-background/70 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                  <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>基于知识库问答</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  提问时说“根据知识库回答”，AI 会优先读取已编译的 wiki。
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Directory config */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">工作区目录</label>
+            <label className="text-sm font-medium">知识库目录</label>
             <Input
               value={wikiPathDraft}
               placeholder=".hermes/llm-wiki"
@@ -372,28 +434,58 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             )}
           </div>
 
-          {!isDefaultPath && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setWikiPathDraft(wikiConfig?.default_path || ".hermes/llm-wiki")}
-            >
-              恢复默认目录
-            </Button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {!isDefaultPath && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setWikiPathDraft(wikiConfig?.default_path || ".hermes/llm-wiki")}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                恢复默认目录
+              </Button>
+            )}
+            {needsInitialization && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleInitializeWiki}
+                disabled={isInitializingWiki || !draftPath}
+              >
+                {isInitializingWiki ? (
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                )}
+                初始化知识库
+              </Button>
+            )}
+          </div>
 
           {/* Note */}
           <div className="rounded-md border-l-2 border-l-primary bg-muted/20 p-4 space-y-2">
             <div className="flex items-center gap-2 text-sm font-medium">
-              <FolderOpen className="h-4 w-4 text-muted-foreground" />
-              <span>目录初始化</span>
+              {wikiConfig?.is_initialized && !pathChanged ? (
+                <Check className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <ShieldAlert className="h-4 w-4 text-amber-600" />
+              )}
+              <span>目录状态</span>
             </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              这里只配置路径。如果该目录尚无 llm-wiki 结构，需要在与 AI 对话时通过技能指令进行初始化，
-              系统会用内置模板创建 Obsidian vault、schema、raw/sources 和 wiki 子目录。
-              初始化后可用 Obsidian 打开该目录进行可视化浏览。
+            <p className={cn("text-xs leading-relaxed", statusTone)}>
+              {pathChanged
+                ? "路径还未保存。可以直接点击初始化，Hermes 会保存这个目录并补齐结构。"
+                : wikiConfig?.status_message || "正在读取目录状态..."}
             </p>
+            {!pathChanged && missingPreview.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                缺少：{missingPreview.join("、")}
+                {wikiConfig && wikiConfig.missing_items.length > missingPreview.length
+                  ? ` 等 ${wikiConfig.missing_items.length} 项`
+                  : ""}
+              </p>
+            )}
           </div>
         </div>
       </div>

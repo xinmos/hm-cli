@@ -51,6 +51,14 @@ async def update_wiki_config(payload: WikiConfigPayload, request: Request) -> Wi
         raise to_http_error(exc) from exc
 
 
+@router.post("/wiki-config/init", response_model=WikiConfigResponse)
+async def initialize_wiki(payload: WikiConfigPayload, request: Request) -> WikiConfigResponse:
+    try:
+        return _llm_service(request).initialize_wiki(payload)
+    except BackendServiceError as exc:
+        raise to_http_error(exc) from exc
+
+
 @router.post("/config/test", response_model=ConnectionTestResponse)
 async def test_model_config(payload: LLMConfigPayload, request: Request) -> ConnectionTestResponse:
     try:

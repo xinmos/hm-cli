@@ -1,14 +1,13 @@
 ---
 name: llm-wiki
-description: Initialize and operate an Obsidian-based LLM Wiki workspace. Use when the user wants to create the wiki directory, ingest raw sources, query the knowledge base, lint it, or says "通过知识库回答"/"基于知识库回答"/"根据知识库".
+description: Operate an Obsidian-based LLM Wiki workspace. Use when the user wants to ingest raw sources, query the knowledge base, lint it, or says "通过知识库回答"/"基于知识库回答"/"根据知识库".
 allowed-tools: init_llm_wiki, Bash(test:*), Bash(mkdir:*), Bash(ls:*), Bash(find:*), Bash(grep:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Read, Write, Edit
 ---
 
 # LLM Wiki
 
-You manage an Obsidian-based LLM Wiki workspace. The workspace is a portable
-feature directory, not just user data. If it does not exist on a new computer,
-initialize it from the templates bundled with this skill.
+You manage an Obsidian-based LLM Wiki workspace. The workspace is initialized
+once from bundled templates, then reused across sessions.
 
 ## Active Path
 
@@ -18,79 +17,19 @@ Hermes injects the configured wiki path here:
 {{LLM_WIKI_PATH}}
 ```
 
-Path precedence is:
-
-1. `HERMES_LLM_WIKI_PATH`
-2. Legacy `LLM_WIKI_PATH`
-3. `.hermes/settings.json` key `llm_wiki.path`
-4. Default: `.hermes/llm-wiki` under the Hermes workdir
-
 In examples:
 
 ```bash
 WIKI_ROOT="{{LLM_WIKI_PATH}}"
 ```
 
-## Skill Assets
-
-Templates live in the Hermes project at:
-
-```text
-hermes/skills/llm-wiki/templates/
-```
-
-Use these files as the source of truth when creating a new wiki:
-
-- `CLAUDE.md`
-- `.gitignore`
-- `.obsidian/app.json`
-- `.obsidian/appearance.json`
-- `.obsidian/core-plugins.json`
-- `.obsidian/graph.json`
-- `.obsidian/community-plugins.json`
-- `purpose.md`
-- `schema/prompt.md`
-- `wiki/index.md`
-- `wiki/log.md`
-- `wiki/overview.md`
-
 ## Initialize
 
-When the user asks to create/init/setup llm-wiki, or the configured path is
-missing, create the workspace.
-
-Prefer calling `init_llm_wiki` first. It creates missing directories and files
-from the bundled templates without overwriting existing files.
-
-If you need to reason about the structure manually, use this target layout:
-
-```plain
-<wiki-root>/
-├── .obsidian/
-├── raw/
-│   ├── assets/
-│   └── sources/
-├── schema/
-└── wiki/
-    ├── comparisons/
-    ├── concepts/
-    ├── entities/
-    ├── queries/
-    ├── sources/
-    └── synthesis/
-```
-
-After initialization:
-
-1. Report the target path and created/skipped files from `init_llm_wiki`.
-2. If the target directory already exists, do not overwrite user files. Only
-   create missing directories/files, then report what already existed and what
-   was created.
-3. Ask the user to edit `purpose.md` if it still contains placeholders such as
-   `[你的领域]` or `[核心问题]`.
-
-Do not copy `.obsidian/workspace.json`, `.obsidian/workspace-mobile.json`,
-`.obsidian/plugins/`, `.git/`, `.DS_Store`, or existing example wiki pages.
+If the workspace is missing or incomplete, do not explain the internal template
+layout. Tell the user to open 设置 → 知识库 and click
+"初始化知识库". If the user explicitly asks you to initialize from chat or CLI,
+call `init_llm_wiki`; it creates only missing files/directories and never
+overwrites existing user files.
 
 ## Session Startup
 
@@ -102,8 +41,8 @@ Before ingesting, querying, or linting, orient yourself:
 4. If creating or updating pages, read `schema/prompt.md`.
 5. Check `raw/sources/` for unprocessed material when ingesting.
 
-If required files are missing, initialize or repair the workspace from the
-templates first.
+If required files are missing, ask the user to initialize from Settings before
+continuing, unless they explicitly ask you to run `init_llm_wiki`.
 
 ## Architecture
 

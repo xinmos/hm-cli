@@ -19,6 +19,7 @@ from hermes.app.llm_config import (
     write_persistent_llm_config,
 )
 from hermes.app.settings import Settings
+from hermes.services.llm_wiki_workspace import initialize_llm_wiki, inspect_llm_wiki
 
 
 class LLMConfigService:
@@ -49,11 +50,11 @@ class LLMConfigService:
             llm_wiki_path = self._llm_wiki_path
         return self._base_settings.with_llm_config(config).with_llm_wiki_path(llm_wiki_path)
 
-    def get_wiki_config(self) -> dict[str, str | None]:
+    def get_wiki_config(self) -> dict[str, Any]:
         with self._lock:
             return self._build_wiki_config_no_lock()
 
-    def update_wiki_config(self, path: str) -> dict[str, str | None]:
+    def update_wiki_config(self, path: str) -> dict[str, Any]:
         normalized_path = path.strip()
         if not normalized_path:
             raise ValueError("llm-wiki path cannot be empty")
@@ -62,6 +63,20 @@ class LLMConfigService:
             self._write_saved_wiki_path(normalized_path)
             self._llm_wiki_path = self._resolve_wiki_path(normalized_path)
             return self._build_wiki_config_no_lock()
+
+    def initialize_wiki(self, path: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            if path is not None:
+                normalized_path = path.strip()
+                if not normalized_path:
+                    raise ValueError("llm-wiki path cannot be empty")
+                self._write_saved_wiki_path(normalized_path)
+                self._llm_wiki_path = self._resolve_wiki_path(normalized_path)
+
+            result = initialize_llm_wiki(self._llm_wiki_path)
+            config = self._build_wiki_config_no_lock()
+            config["init_result"] = result.to_dict()
+            return config
 
     def update_config(self, data: dict[str, Any]) -> LLMConfig:
         with self._lock:
@@ -92,16 +107,22 @@ class LLMConfigService:
             return content
         return str(content)
 
-    def _build_wiki_config_no_lock(self) -> dict[str, str | None]:
+    def _build_wiki_config_no_lock(self) -> dict[str, Any]:
         saved_path = self._read_saved_wiki_path()
         env_path = self._read_env_wiki_path()
         default_path = self._workdir / ".hermes" / "llm-wiki"
+        status = inspect_llm_wiki(self._llm_wiki_path)
         return {
             "path": env_path or saved_path or str(default_path),
             "effective_path": str(self._llm_wiki_path),
             "default_path": str(default_path),
             "saved_path": saved_path,
             "env_path": env_path,
+            "exists": status.exists,
+            "is_directory": status.is_directory,
+            "is_initialized": status.is_initialized,
+            "missing_items": status.missing_items,
+            "status_message": status.message,
         }
 
     def _read_env_wiki_path(self) -> str | None:

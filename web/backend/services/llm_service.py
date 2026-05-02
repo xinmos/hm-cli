@@ -38,6 +38,13 @@ class LLMApiService:
             raise ValidationError(str(exc)) from exc
         return WikiConfigResponse(**config)
 
+    def initialize_wiki(self, payload: WikiConfigPayload) -> WikiConfigResponse:
+        try:
+            config = self._services.llm_config.initialize_wiki(payload.path)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return WikiConfigResponse(**config)
+
     def test_config(self, payload: LLMConfigPayload) -> ConnectionTestResponse:
         try:
             content = self._services.llm_config.test_connection(payload.model_dump())

@@ -55,3 +55,9 @@ class WikiConfigResponse(BaseModel):
     default_path: str
     saved_path: str | None = None
     env_path: str | None = None
+    exists: bool = False
+    is_directory: bool = True
+    is_initialized: bool = False
+    missing_items: list[str] = Field(default_factory=list)
+    status_message: str = ""
+    init_result: dict | None = None

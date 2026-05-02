@@ -293,8 +293,8 @@ def _build_system_prompt_base(settings: Settings | None, skill_repo: SkillReposi
             "\n\n## 项目设置\n"
             f"- llm-wiki 知识库路径: `{settings.llm_wiki_path}`\n"
             "- 当用户说“通过知识库回答”、“基于知识库回答”、“根据知识库”或类似表达时，"
-            "先调用 `load_skill(\"llm-wiki\")` 获取完整指令；如果目录未初始化，按 skill 指令初始化，"
-            "然后基于该知识库读取、检索并回答。"
+            "先调用 `load_skill(\"llm-wiki\")` 获取操作指令；如果目录未初始化，简短提醒用户在设置的知识库页面点击初始化，"
+            "用户明确要求你初始化时再调用 `init_llm_wiki`。"
         )
 
     if skill_repo is None:

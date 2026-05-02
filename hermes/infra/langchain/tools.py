@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-import shutil
 from typing import Any
 
 from langchain_core.tools import tool as langchain_tool
@@ -10,6 +8,7 @@ from hermes.app.ports import InteractionPort, SkillRepository
 from hermes.app.settings import Settings
 from hermes.core.skill_permissions import SkillToolPermissionChecker
 from hermes.security import CommandSafety, SecurityManager
+from hermes.services.llm_wiki_workspace import initialize_llm_wiki
 
 
 class LangChainToolCatalog:
@@ -85,12 +84,9 @@ class LangChainToolCatalog:
 
     def _init_llm_wiki(self) -> str:
         wiki_root = self._settings.llm_wiki_path
-        templates_dir = Path(__file__).parent.parent.parent / "skills" / "llm-wiki" / "templates"
 
         if not self._security.is_path_allowed(wiki_root):
             return f"Access denied: {wiki_root}"
-        if not templates_dir.exists():
-            return f"Template directory not found: {templates_dir}"
 
         if self._interaction_port:
             if not self._interaction_port.confirm(
@@ -100,51 +96,22 @@ class LangChainToolCatalog:
             ):
                 return "Initialization rejected by user"
 
-        directories = [
-            ".obsidian",
-            "raw/assets",
-            "raw/sources",
-            "schema",
-            "wiki/comparisons",
-            "wiki/concepts",
-            "wiki/entities",
-            "wiki/queries",
-            "wiki/sources",
-            "wiki/synthesis",
-        ]
-
-        created_dirs: list[str] = []
-        for relative_dir in directories:
-            target_dir = wiki_root / relative_dir
-            if not target_dir.exists():
-                target_dir.mkdir(parents=True, exist_ok=True)
-                created_dirs.append(relative_dir)
-
-        created_files: list[str] = []
-        skipped_files: list[str] = []
-        for template_path in sorted(templates_dir.rglob("*")):
-            if not template_path.is_file():
-                continue
-            relative_path = template_path.relative_to(templates_dir)
-            target_path = wiki_root / relative_path
-            if target_path.exists():
-                skipped_files.append(str(relative_path))
-                continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(template_path, target_path)
-            created_files.append(str(relative_path))
+        try:
+            result = initialize_llm_wiki(wiki_root)
+        except ValueError as exc:
+            return str(exc)
 
         lines = [f"llm-wiki initialized at: {wiki_root}"]
-        if created_dirs:
+        if result.created_dirs:
             lines.append("Created directories:")
-            lines.extend(f"- {path}" for path in created_dirs)
-        if created_files:
+            lines.extend(f"- {path}" for path in result.created_dirs)
+        if result.created_files:
             lines.append("Created files:")
-            lines.extend(f"- {path}" for path in created_files)
-        if skipped_files:
+            lines.extend(f"- {path}" for path in result.created_files)
+        if result.skipped_files:
             lines.append("Skipped existing files:")
-            lines.extend(f"- {path}" for path in skipped_files)
-        if not created_dirs and not created_files:
+            lines.extend(f"- {path}" for path in result.skipped_files)
+        if not result.created_dirs and not result.created_files:
             lines.append("No changes needed; workspace already had the expected structure.")
         return "\n".join(lines)
 

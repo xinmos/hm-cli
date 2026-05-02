@@ -87,6 +87,24 @@ export interface WikiConfig {
   default_path: string;
   saved_path?: string | null;
   env_path?: string | null;
+  exists: boolean;
+  is_directory: boolean;
+  is_initialized: boolean;
+  missing_items: string[];
+  status_message: string;
+  init_result?: {
+    path: string;
+    created_dirs: string[];
+    created_files: string[];
+    skipped_files: string[];
+    status: {
+      exists: boolean;
+      is_directory: boolean;
+      is_initialized: boolean;
+      missing_items: string[];
+      message: string;
+    };
+  } | null;
 }
 
 export interface ModelSummary {
@@ -338,6 +356,19 @@ export async function saveWikiConfig(path: string): Promise<WikiConfig> {
   });
   if (!res.ok) throw new Error("Failed to save wiki config");
   return res.json();
+}
+
+export async function initializeWiki(path: string): Promise<WikiConfig> {
+  const res = await fetch(`${API_BASE}/api/models/wiki-config/init`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || "Failed to initialize wiki");
+  }
+  return data;
 }
 
 export async function testModelConfig(config: ModelConfig): Promise<{ ok: boolean; message: string }> {
