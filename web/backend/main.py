@@ -2,16 +2,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 _project_root = Path(__file__).parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from web.backend.api.routes import chats, models, projects, skills, workspace
-from web.backend.app_state import build_web_services
-from web.backend.session_manager import SessionManager
+from web.backend.controllers import chats, health, models, projects, skills, websocket, workspace
+from web.backend.services import SessionManager, build_web_services
 
 
 @asynccontextmanager
@@ -43,28 +42,5 @@ app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(skills.router, prefix="/api/skills", tags=["skills"])
 app.include_router(workspace.router, prefix="/api/workspace", tags=["workspace"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
-
-
-@app.websocket("/ws/chat/{session_id}")
-async def websocket_chat(websocket: WebSocket, session_id: str):
-    session_manager: SessionManager = websocket.app.state.session_manager
-    await websocket.accept()
-    await session_manager.connect(session_id, websocket)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            await session_manager.handle_message(session_id, data)
-    except WebSocketDisconnect:
-        await session_manager.disconnect(session_id)
-    except RuntimeError:
-        await session_manager.disconnect(session_id)
-
-
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "ok",
-        "api": "Hermes Web API",
-        "streaming": "sse",
-        "workspace": "ready",
-    }
+app.include_router(websocket.router)
+app.include_router(health.router)

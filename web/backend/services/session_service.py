@@ -12,7 +12,7 @@ from hermes.app import InteractionPort
 from hermes.app.bootstrap import ControlPlaneApp, ControlPlaneRuntime
 from hermes.app.ports import ChatMessageRecord
 
-from web.backend.app_state import WebServiceContainer
+from web.backend.services.container import WebServiceContainer
 
 
 class WebInteractionPort(InteractionPort):
