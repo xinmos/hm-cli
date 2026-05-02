@@ -33,6 +33,9 @@ class AgentSession:
     def set_tools(self, tools: list[Any]) -> None:
         self._tools = tools
 
+    def get_tool_count(self) -> int:
+        return len(self._tools)
+
     def set_interaction_port(self, port: InteractionPort) -> None:
         self._interaction_port = port
 

@@ -28,10 +28,11 @@ class WebServiceContainer:
         interaction_port: InteractionPort | None = None,
         model_name: str | None = None,
     ) -> tuple[ControlPlaneApp, ControlPlaneRuntime]:
+        settings = self.llm_config.build_settings()
         config = self.llm_config.get_effective_config()
         if model_name:
             config = replace(config, model=model_name)
-        settings = self.settings.with_llm_config(config)
+            settings = settings.with_llm_config(config)
         return assemble_control_plane(
             settings=settings,
             interaction_port=interaction_port,

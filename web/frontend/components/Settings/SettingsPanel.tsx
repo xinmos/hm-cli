@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   Archive,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
@@ -10,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  FolderOpen,
   Info,
   Key,
   ListTree,
@@ -50,8 +52,11 @@ import {
   deleteChat,
   fetchChats,
   fetchModelConfig,
+  fetchWikiConfig,
   saveModelConfig,
+  saveWikiConfig,
   type ModelConfig,
+  type WikiConfig,
 } from "@/lib/api";
 
 interface SettingsPanelProps {
@@ -61,6 +66,7 @@ interface SettingsPanelProps {
 
 type SettingsCategory =
   | "model"
+  | "knowledge"
   | "permissions"
   | "data";
 
@@ -166,6 +172,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [newModelName, setNewModelName] = useState("");
   const [toast, setToast] = useState<ToastState>(null);
+  const [wikiConfig, setWikiConfig] = useState<WikiConfig | null>(null);
+  const [wikiPathDraft, setWikiPathDraft] = useState(".hermes/llm-wiki");
 
   const [dataTab, setDataTab] = useState<DataTab>("overview");
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -204,6 +212,16 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         setSaveStatus("error");
       });
 
+    fetchWikiConfig()
+      .then((response) => {
+        if (cancelled) return;
+        setWikiConfig(response);
+        setWikiPathDraft(response.path);
+      })
+      .catch((error) => {
+        console.error("Failed to load llm-wiki config:", error);
+      });
+
     fetchChats()
       .then((chats) => {
         if (cancelled) return;
@@ -235,18 +253,30 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
     try {
       const validationError = validateModelSettings(modelSettings);
-      if (validationError) {
+      if (activeCategory === "model" && validationError) {
         setSaveStatus("error");
         return;
       }
 
-      const response = await saveModelConfig(normalizeModelSettings(modelSettings));
-      setModelSettings(response.config);
-      setEnvSettings(response.env_masked);
-      const settings = {
-        permissions: permissionSettings,
-      };
-      localStorage.setItem("hermes-settings", JSON.stringify(settings));
+      if (activeCategory === "model") {
+        const response = await saveModelConfig(normalizeModelSettings(modelSettings));
+        setModelSettings(response.config);
+        setEnvSettings(response.env_masked);
+      } else if (activeCategory === "knowledge") {
+        const path = wikiPathDraft.trim();
+        if (!path) {
+          setSaveStatus("error");
+          return;
+        }
+        const response = await saveWikiConfig(path);
+        setWikiConfig(response);
+        setWikiPathDraft(response.path);
+      } else {
+        const settings = {
+          permissions: permissionSettings,
+        };
+        localStorage.setItem("hermes-settings", JSON.stringify(settings));
+      }
       setSaveStatus("success");
       setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (e) {
@@ -258,6 +288,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
   const categories = [
     { id: "model" as const, name: "模型配置", icon: Key },
+    { id: "knowledge" as const, name: "知识库", icon: FolderOpen },
     { id: "permissions" as const, name: "权限设置", icon: Shield },
     { id: "data" as const, name: "数据管理", icon: Database },
   ];
@@ -295,6 +326,78 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const showToast = (message: string, type: ToastType = "success") => {
     setToast({ message, type });
     window.setTimeout(() => setToast(null), 2600);
+  };
+
+  const renderKnowledgeSettings = () => {
+    const isDefaultPath = wikiConfig && wikiPathDraft.trim() === wikiConfig.default_path;
+    const resolvedPath = wikiConfig?.effective_path || wikiPathDraft || ".hermes/llm-wiki";
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-lg font-medium mb-1">知识库</h3>
+          <p className="text-sm text-muted-foreground">配置 llm-wiki 工作区，用于 AI 知识管理和问答</p>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-5">
+          {/* What is llm-wiki */}
+          <div className="rounded-md border bg-muted/20 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <BookOpen className="h-4 w-4 text-muted-foreground" />
+              <span>什么是 llm-wiki？</span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              llm-wiki 是一个基于 Obsidian 的 LLM 知识库系统。你可以将原始资料放入 raw/sources/，
+              AI 会自动整理、归纳并生成结构化的 wiki 页面到 wiki/ 目录中，支持实体、概念、合成分类管理。
+            </p>
+          </div>
+
+          {/* Directory config */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">工作区目录</label>
+            <Input
+              value={wikiPathDraft}
+              placeholder=".hermes/llm-wiki"
+              onChange={(event) => setWikiPathDraft(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              实际路径：<span className="font-mono text-foreground">{resolvedPath}</span>
+            </p>
+            {wikiConfig?.env_path && (
+              <p className="text-xs text-amber-600">
+                环境变量正在覆盖配置：{wikiConfig.env_path}
+              </p>
+            )}
+          </div>
+
+          {!isDefaultPath && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setWikiPathDraft(wikiConfig?.default_path || ".hermes/llm-wiki")}
+            >
+              恢复默认目录
+            </Button>
+          )}
+
+          {/* Note */}
+          <div className="rounded-md border-l-2 border-l-primary bg-muted/20 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+              <span>目录初始化</span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              这里只配置路径。如果该目录尚无 llm-wiki 结构，需要在与 AI 对话时通过技能指令进行初始化，
+              系统会用内置模板创建 Obsidian vault、schema、raw/sources 和 wiki 子目录。
+              初始化后可用 Obsidian 打开该目录进行可视化浏览。
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Render model settings
@@ -1078,6 +1181,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     switch (activeCategory) {
       case "model":
         return renderModelSettings();
+      case "knowledge":
+        return renderKnowledgeSettings();
       case "permissions":
         return renderPermissionSettings();
       case "data":

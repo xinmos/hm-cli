@@ -81,6 +81,14 @@ export interface ModelConfigResponse {
   env_masked: Partial<ModelConfig>;
 }
 
+export interface WikiConfig {
+  path: string;
+  effective_path: string;
+  default_path: string;
+  saved_path?: string | null;
+  env_path?: string | null;
+}
+
 export interface ModelSummary {
   id: string;
   name: string;
@@ -300,6 +308,12 @@ export async function fetchModelConfig(): Promise<ModelConfigResponse> {
   return res.json();
 }
 
+export async function fetchWikiConfig(): Promise<WikiConfig> {
+  const res = await fetch(`${API_BASE}/api/models/wiki-config`);
+  if (!res.ok) throw new Error("Failed to fetch wiki config");
+  return res.json();
+}
+
 export async function fetchModels(): Promise<ModelSummary[]> {
   const res = await fetch(`${API_BASE}/api/models`);
   if (!res.ok) throw new Error("Failed to fetch models");
@@ -313,6 +327,16 @@ export async function saveModelConfig(config: ModelConfig): Promise<ModelConfigR
     body: JSON.stringify(config),
   });
   if (!res.ok) throw new Error("Failed to save model config");
+  return res.json();
+}
+
+export async function saveWikiConfig(path: string): Promise<WikiConfig> {
+  const res = await fetch(`${API_BASE}/api/models/wiki-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error("Failed to save wiki config");
   return res.json();
 }
 

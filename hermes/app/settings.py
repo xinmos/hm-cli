@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import orjson
 from dotenv import load_dotenv
 
 from hermes.app.llm_config import LLMConfig, load_effective_llm_config
@@ -31,6 +32,7 @@ class Settings:
     context_max_messages: int
     tasks_path: Path
     context_window: int
+    llm_wiki_path: Path
 
     @classmethod
     def from_env_and_args(
@@ -45,6 +47,7 @@ class Settings:
 
         workdir = Path(os.getenv("HERMES_WORKDIR", ".")).resolve()
         llm_config = load_effective_llm_config(workdir)
+        app_config = _read_persistent_app_config(workdir)
 
         return cls(
             openai_api_key=llm_config.api_key or "",
@@ -66,6 +69,7 @@ class Settings:
             context_max_messages=int(os.getenv("HERMES_CONTEXT_MAX", "50")),
             tasks_path=Path(os.getenv("HERMES_TASKS_PATH", workdir / ".hermes" / "tasks.json")),
             context_window=int(os.getenv("CONTEXT_WINDOW", "256")) * 1024,
+            llm_wiki_path=_resolve_llm_wiki_path(workdir, app_config),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,6 +93,7 @@ class Settings:
             "context_max_messages": self.context_max_messages,
             "tasks_path": str(self.tasks_path),
             "context_window": self.context_window,
+            "llm_wiki_path": str(self.llm_wiki_path),
         }
 
     def with_llm_config(self, config: LLMConfig) -> "Settings":
@@ -106,3 +111,43 @@ class Settings:
             streaming=normalized.streaming,
             custom_models=normalized.custom_models or [],
         )
+
+    def with_llm_wiki_path(self, path: Path) -> "Settings":
+        return replace(self, llm_wiki_path=path.resolve())
+
+
+def _read_persistent_app_config(workdir: Path) -> dict[str, Any]:
+    path = workdir / ".hermes" / "settings.json"
+    if not path.exists():
+        return {}
+    try:
+        raw = orjson.loads(path.read_bytes())
+    except orjson.JSONDecodeError:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return raw
+
+
+def _resolve_llm_wiki_path(workdir: Path, app_config: dict[str, Any]) -> Path:
+    configured_path = os.getenv("HERMES_LLM_WIKI_PATH") or os.getenv("LLM_WIKI_PATH")
+
+    if configured_path is None:
+        llm_wiki_config = app_config.get("llm_wiki")
+        if isinstance(llm_wiki_config, dict):
+            raw_path = llm_wiki_config.get("path")
+            if isinstance(raw_path, str) and raw_path.strip():
+                configured_path = raw_path
+
+    if configured_path is None:
+        raw_path = app_config.get("llm_wiki_path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            configured_path = raw_path
+
+    if configured_path is None:
+        return (workdir / ".hermes" / "llm-wiki").resolve()
+
+    expanded = Path(os.path.expandvars(os.path.expanduser(configured_path)))
+    if expanded.is_absolute():
+        return expanded.resolve()
+    return (workdir / expanded).resolve()

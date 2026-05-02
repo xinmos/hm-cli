@@ -39,6 +39,7 @@ class ControlPlaneApp:
         soul: SoulIdentity | None = None,
         interaction_port: InteractionPort | None = None,
         memory_manager: MemoryManager | None = None,
+        base_system_prompt: str | None = None,
     ):
         self.settings = settings
         self.agent = agent_session
@@ -48,7 +49,7 @@ class ControlPlaneApp:
         self.soul = soul
         self.interaction = interaction_port
         self.memory = memory_manager
-        self._base_system_prompt = _build_system_prompt_base(skill_repo=None)
+        self._base_system_prompt = base_system_prompt or _build_system_prompt_base(settings, skill_repo=None)
 
     def set_soul(self, soul: SoulIdentity) -> None:
         self.soul = soul
@@ -190,7 +191,10 @@ def assemble_control_plane(
     if settings is None:
         settings = Settings.from_env_and_args(env_file=env_file)
 
-    skill_repo: SkillRepository = FileSkillRepository(settings.workdir)
+    skill_repo: SkillRepository = FileSkillRepository(
+        settings.workdir,
+        llm_wiki_path=settings.llm_wiki_path,
+    )
     task_store: TaskStore = JsonTaskStore(settings.tasks_path)
 
     skill_service = SkillService(skill_repo)
@@ -222,7 +226,7 @@ def assemble_control_plane(
         interaction_port=interaction_port,
     )
 
-    base_prompt = _build_system_prompt_base(skill_repo)
+    base_prompt = _build_system_prompt_base(settings, skill_repo)
     full_system_prompt = base_prompt
     if current_soul:
         soul_prompt = current_soul.to_system_prompt()
@@ -255,6 +259,7 @@ def assemble_control_plane(
         soul=current_soul,
         interaction_port=interaction_port,
         memory_manager=memory_manager,
+        base_system_prompt=base_prompt,
     )
     runtime = ControlPlaneRuntime(
         scheduler_driver=scheduler_driver,
@@ -277,11 +282,20 @@ def bootstrap(
     return app
 
 
-def _build_system_prompt_base(skill_repo: SkillRepository | None) -> str:
+def _build_system_prompt_base(settings: Settings | None, skill_repo: SkillRepository | None) -> str:
     prompt_path = Path(__file__).parent.parent / "prompts" / "system.md"
     base_prompt = ""
     if prompt_path.exists():
         base_prompt = prompt_path.read_text(encoding="utf-8")
+
+    if settings is not None:
+        base_prompt += (
+            "\n\n## 项目设置\n"
+            f"- llm-wiki 知识库路径: `{settings.llm_wiki_path}`\n"
+            "- 当用户说“通过知识库回答”、“基于知识库回答”、“根据知识库”或类似表达时，"
+            "先调用 `load_skill(\"llm-wiki\")` 获取完整指令；如果目录未初始化，按 skill 指令初始化，"
+            "然后基于该知识库读取、检索并回答。"
+        )
 
     if skill_repo is None:
         return base_prompt

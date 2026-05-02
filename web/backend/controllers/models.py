@@ -10,6 +10,8 @@ from web.backend.models.llm import (
     LLMConfigPayload,
     LLMConfigResponse,
     ModelResponse,
+    WikiConfigPayload,
+    WikiConfigResponse,
 )
 from web.backend.services.exceptions import BackendServiceError
 from web.backend.services.llm_service import LLMApiService
@@ -31,9 +33,22 @@ async def get_model_config(request: Request) -> LLMConfigResponse:
     return _llm_service(request).get_config()
 
 
+@router.get("/wiki-config", response_model=WikiConfigResponse)
+async def get_wiki_config(request: Request) -> WikiConfigResponse:
+    return _llm_service(request).get_wiki_config()
+
+
 @router.put("/config", response_model=LLMConfigResponse)
 async def update_model_config(payload: LLMConfigPayload, request: Request) -> LLMConfigResponse:
     return _llm_service(request).update_config(payload)
+
+
+@router.put("/wiki-config", response_model=WikiConfigResponse)
+async def update_wiki_config(payload: WikiConfigPayload, request: Request) -> WikiConfigResponse:
+    try:
+        return _llm_service(request).update_wiki_config(payload)
+    except BackendServiceError as exc:
+        raise to_http_error(exc) from exc
 
 
 @router.post("/config/test", response_model=ConnectionTestResponse)

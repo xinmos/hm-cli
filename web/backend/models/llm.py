@@ -43,3 +43,15 @@ class EnvTextResponse(BaseModel):
 class ConnectionTestResponse(BaseModel):
     ok: bool
     message: str
+
+
+class WikiConfigPayload(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class WikiConfigResponse(BaseModel):
+    path: str
+    effective_path: str
+    default_path: str
+    saved_path: str | None = None
+    env_path: str | None = None

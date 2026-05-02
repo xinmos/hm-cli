@@ -98,10 +98,12 @@ class CLIAdapter:
         text.append(f"  Model:  ", style="dim")
         text.append(f"{self._app.settings.model_name}\n", style="info")
         text.append(f"  Tools:  ", style="dim")
-        text.append(f"5\n", style="info")
+        text.append(f"{self._app.agent.get_tool_count()}\n", style="info")
         skills = self._app.skills.list_skills()
         text.append(f"  Skills: ", style="dim")
         text.append(f"{len(skills)}\n", style="info")
+        text.append(f"  Wiki:   ", style="dim")
+        text.append(f"{self._app.settings.llm_wiki_path}\n", style="info")
         return Padding(text, (0, 0, 1, 0))
 
     def _show_welcome(self) -> None:

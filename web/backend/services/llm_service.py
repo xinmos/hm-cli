@@ -6,6 +6,8 @@ from web.backend.models.llm import (
     LLMConfigPayload,
     LLMConfigResponse,
     ModelResponse,
+    WikiConfigPayload,
+    WikiConfigResponse,
 )
 from web.backend.services.container import WebServiceContainer
 from web.backend.services.exceptions import ValidationError
@@ -22,9 +24,19 @@ class LLMApiService:
     def get_config(self) -> LLMConfigResponse:
         return self._build_config_response()
 
+    def get_wiki_config(self) -> WikiConfigResponse:
+        return WikiConfigResponse(**self._services.llm_config.get_wiki_config())
+
     def update_config(self, payload: LLMConfigPayload) -> LLMConfigResponse:
         self._services.llm_config.update_config(payload.model_dump())
         return self._build_config_response()
+
+    def update_wiki_config(self, payload: WikiConfigPayload) -> WikiConfigResponse:
+        try:
+            config = self._services.llm_config.update_wiki_config(payload.path)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return WikiConfigResponse(**config)
 
     def test_config(self, payload: LLMConfigPayload) -> ConnectionTestResponse:
         try:

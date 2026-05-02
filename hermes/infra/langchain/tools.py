@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
 from typing import Any
 
 from langchain_core.tools import tool as langchain_tool
@@ -20,7 +22,11 @@ class LangChainToolCatalog:
         self._settings = settings
         self._skill_repo = skill_repository
         self._interaction_port = interaction_port
-        self._security = SecurityManager(settings.workdir, settings.strict_sandbox)
+        self._security = SecurityManager(
+            settings.workdir,
+            settings.strict_sandbox,
+            allowed_roots=[settings.llm_wiki_path],
+        )
         self._tools: list[Any] = []
         self._build_tools()
 
@@ -34,10 +40,10 @@ class LangChainToolCatalog:
         return None
 
     def _check_command_safety(self, command: str) -> str | None:
-        safety_level = self._security.check_command_safety(command)
+        safety_level, message = self._security.check_command_safety(command)
 
         if safety_level == CommandSafety.REJECTED:
-            return f"Command not allowed (high risk): {command}"
+            return message
 
         if safety_level == CommandSafety.NEEDS_CONFIRMATION:
             if self._interaction_port:
@@ -76,6 +82,71 @@ class LangChainToolCatalog:
             return f"Command timed out after {self._settings.command_timeout} seconds"
         except Exception as e:
             return f"Error: {e}"
+
+    def _init_llm_wiki(self) -> str:
+        wiki_root = self._settings.llm_wiki_path
+        templates_dir = Path(__file__).parent.parent.parent / "skills" / "llm-wiki" / "templates"
+
+        if not self._security.is_path_allowed(wiki_root):
+            return f"Access denied: {wiki_root}"
+        if not templates_dir.exists():
+            return f"Template directory not found: {templates_dir}"
+
+        if self._interaction_port:
+            if not self._interaction_port.confirm(
+                "init_llm_wiki",
+                f"Initialize llm-wiki at {wiki_root}",
+                f"InitLLMWiki({wiki_root})",
+            ):
+                return "Initialization rejected by user"
+
+        directories = [
+            ".obsidian",
+            "raw/assets",
+            "raw/sources",
+            "schema",
+            "wiki/comparisons",
+            "wiki/concepts",
+            "wiki/entities",
+            "wiki/queries",
+            "wiki/sources",
+            "wiki/synthesis",
+        ]
+
+        created_dirs: list[str] = []
+        for relative_dir in directories:
+            target_dir = wiki_root / relative_dir
+            if not target_dir.exists():
+                target_dir.mkdir(parents=True, exist_ok=True)
+                created_dirs.append(relative_dir)
+
+        created_files: list[str] = []
+        skipped_files: list[str] = []
+        for template_path in sorted(templates_dir.rglob("*")):
+            if not template_path.is_file():
+                continue
+            relative_path = template_path.relative_to(templates_dir)
+            target_path = wiki_root / relative_path
+            if target_path.exists():
+                skipped_files.append(str(relative_path))
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(template_path, target_path)
+            created_files.append(str(relative_path))
+
+        lines = [f"llm-wiki initialized at: {wiki_root}"]
+        if created_dirs:
+            lines.append("Created directories:")
+            lines.extend(f"- {path}" for path in created_dirs)
+        if created_files:
+            lines.append("Created files:")
+            lines.extend(f"- {path}" for path in created_files)
+        if skipped_files:
+            lines.append("Skipped existing files:")
+            lines.extend(f"- {path}" for path in skipped_files)
+        if not created_dirs and not created_files:
+            lines.append("No changes needed; workspace already had the expected structure.")
+        return "\n".join(lines)
 
     def _build_tools(self) -> None:
         @langchain_tool
@@ -165,6 +236,12 @@ class LangChainToolCatalog:
                 return f"Error editing file: {e}"
 
         @langchain_tool
+        def init_llm_wiki() -> str:
+            """Initialize the configured llm-wiki workspace from bundled templates without overwriting files."""
+            self._show_tool(f"InitLLMWiki({self._settings.llm_wiki_path})")
+            return self._init_llm_wiki()
+
+        @langchain_tool
         def load_skill(skill_name: str) -> str:
             """Load a skill by name to get its full instructions."""
             skill = self._skill_repo.get(skill_name)
@@ -172,4 +249,4 @@ class LangChainToolCatalog:
                 return skill.instructions
             return f"Skill not found: {skill_name}"
 
-        self._tools = [bash, read, write, edit, load_skill]
+        self._tools = [bash, read, write, edit, init_llm_wiki, load_skill]
