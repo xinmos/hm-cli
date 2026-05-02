@@ -8,6 +8,7 @@ from hermes.app.ports import InteractionPort, SkillRepository
 from hermes.app.settings import Settings
 from hermes.core.skill_permissions import SkillToolPermissionChecker
 from hermes.security import CommandSafety, SecurityManager
+from hermes.services.llm_wiki_workspace import initialize_llm_wiki
 
 
 class LangChainToolCatalog:
@@ -20,7 +21,11 @@ class LangChainToolCatalog:
         self._settings = settings
         self._skill_repo = skill_repository
         self._interaction_port = interaction_port
-        self._security = SecurityManager(settings.workdir, settings.strict_sandbox)
+        self._security = SecurityManager(
+            settings.workdir,
+            settings.strict_sandbox,
+            allowed_roots=[settings.llm_wiki_path],
+        )
         self._tools: list[Any] = []
         self._build_tools()
 
@@ -34,10 +39,10 @@ class LangChainToolCatalog:
         return None
 
     def _check_command_safety(self, command: str) -> str | None:
-        safety_level = self._security.check_command_safety(command)
+        safety_level, message = self._security.check_command_safety(command)
 
         if safety_level == CommandSafety.REJECTED:
-            return f"Command not allowed (high risk): {command}"
+            return message
 
         if safety_level == CommandSafety.NEEDS_CONFIRMATION:
             if self._interaction_port:
@@ -76,6 +81,39 @@ class LangChainToolCatalog:
             return f"Command timed out after {self._settings.command_timeout} seconds"
         except Exception as e:
             return f"Error: {e}"
+
+    def _init_llm_wiki(self) -> str:
+        wiki_root = self._settings.llm_wiki_path
+
+        if not self._security.is_path_allowed(wiki_root):
+            return f"Access denied: {wiki_root}"
+
+        if self._interaction_port:
+            if not self._interaction_port.confirm(
+                "init_llm_wiki",
+                f"Initialize llm-wiki at {wiki_root}",
+                f"InitLLMWiki({wiki_root})",
+            ):
+                return "Initialization rejected by user"
+
+        try:
+            result = initialize_llm_wiki(wiki_root)
+        except ValueError as exc:
+            return str(exc)
+
+        lines = [f"llm-wiki initialized at: {wiki_root}"]
+        if result.created_dirs:
+            lines.append("Created directories:")
+            lines.extend(f"- {path}" for path in result.created_dirs)
+        if result.created_files:
+            lines.append("Created files:")
+            lines.extend(f"- {path}" for path in result.created_files)
+        if result.skipped_files:
+            lines.append("Skipped existing files:")
+            lines.extend(f"- {path}" for path in result.skipped_files)
+        if not result.created_dirs and not result.created_files:
+            lines.append("No changes needed; workspace already had the expected structure.")
+        return "\n".join(lines)
 
     def _build_tools(self) -> None:
         @langchain_tool
@@ -165,6 +203,12 @@ class LangChainToolCatalog:
                 return f"Error editing file: {e}"
 
         @langchain_tool
+        def init_llm_wiki() -> str:
+            """Initialize the configured llm-wiki workspace from bundled templates without overwriting files."""
+            self._show_tool(f"InitLLMWiki({self._settings.llm_wiki_path})")
+            return self._init_llm_wiki()
+
+        @langchain_tool
         def load_skill(skill_name: str) -> str:
             """Load a skill by name to get its full instructions."""
             skill = self._skill_repo.get(skill_name)
@@ -172,4 +216,4 @@ class LangChainToolCatalog:
                 return skill.instructions
             return f"Skill not found: {skill_name}"
 
-        self._tools = [bash, read, write, edit, load_skill]
+        self._tools = [bash, read, write, edit, init_llm_wiki, load_skill]

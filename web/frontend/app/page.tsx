@@ -49,8 +49,39 @@ interface PendingOutboundMessage {
   };
 }
 
+interface ActiveStreamSnapshot {
+  id: string;
+  content: string;
+  created_at: string;
+  currentAction?: string;
+  streamPhase?: "thinking" | "responding";
+}
+
 function sortChatsByUpdatedAt(chats: Chat[]): Chat[] {
   return [...chats].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+}
+
+function withStreamingSnapshot(messages: Message[], snapshot: ActiveStreamSnapshot): Message[] {
+  const streamingMessage: Message = {
+    id: snapshot.id,
+    role: "assistant",
+    content: snapshot.content,
+    created_at: snapshot.created_at,
+    currentAction: snapshot.currentAction,
+    isStreaming: true,
+    streamPhase: snapshot.streamPhase,
+  };
+  const index = messages.findIndex((message) => message.id === snapshot.id);
+
+  if (index === -1) {
+    return [...messages, streamingMessage];
+  }
+
+  return [
+    ...messages.slice(0, index),
+    streamingMessage,
+    ...messages.slice(index + 1),
+  ];
 }
 
 export default function Home() {
@@ -62,138 +93,200 @@ export default function Home() {
   const [pendingOutbound, setPendingOutbound] = useState<PendingOutboundMessage | null>(null);
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   const [tokenUsage, setTokenUsage] = useState({ used: 0, total: 256 * 1024 });
-  const [isStreaming, setIsStreaming] = useState(false);
-  const streamAbortRef = useRef<AbortController | null>(null);
+  const [streamingChatIds, setStreamingChatIds] = useState<Set<string>>(() => new Set());
+  const streamAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const activeStreamsRef = useRef<Map<string, ActiveStreamSnapshot>>(new Map());
+  const currentChatIdRef = useRef<string | null>(null);
 
-  const handleStreamEvent = useCallback((data: any) => {
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId;
+  }, [currentChatId]);
+
+  const markChatStreaming = useCallback((chatId: string, isStreaming: boolean) => {
+    setStreamingChatIds((prev) => {
+      const next = new Set(prev);
+      if (isStreaming) {
+        next.add(chatId);
+      } else {
+        next.delete(chatId);
+      }
+      return next;
+    });
+  }, []);
+
+  const applyActiveStreamSnapshot = useCallback((chatId: string) => {
+    const snapshot = activeStreamsRef.current.get(chatId);
+    if (!snapshot || currentChatIdRef.current !== chatId) {
+      return;
+    }
+
+    setMessages((prev) => withStreamingSnapshot(prev, snapshot));
+  }, []);
+
+  const handleStreamEvent = useCallback((chatId: string, data: any) => {
     switch (data.type) {
       case "stream_start":
-        setIsStreaming(true);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `msg-${Date.now()}`,
-            role: "assistant",
-            content: "",
-            created_at: new Date().toISOString(),
-            currentAction: "正在分析你的问题",
-            isStreaming: true,
-            streamPhase: "thinking",
-          },
-        ]);
+        markChatStreaming(chatId, true);
+        activeStreamsRef.current.set(chatId, {
+          id: `stream-${chatId}-${Date.now()}`,
+          content: "",
+          created_at: new Date().toISOString(),
+          currentAction: "正在分析你的问题",
+          streamPhase: "thinking",
+        });
+        applyActiveStreamSnapshot(chatId);
         break;
       case "tool_start":
-        setMessages((prev) => {
-          const lastMsg = prev[prev.length - 1];
-          if (!lastMsg?.isStreaming) {
-            return prev;
+        {
+          const snapshot = activeStreamsRef.current.get(chatId);
+          if (!snapshot) {
+            break;
           }
-
-          return [
-            ...prev.slice(0, -1),
-            {
-              ...lastMsg,
-              currentAction: data.tool_display || "正在处理中",
-            },
-          ];
-        });
+          activeStreamsRef.current.set(chatId, {
+            ...snapshot,
+            currentAction: data.tool_display || "正在处理中",
+          });
+          applyActiveStreamSnapshot(chatId);
+        }
         break;
       case "stream_delta":
-        setMessages((prev) => {
-          const lastMsg = prev[prev.length - 1];
-          if (lastMsg?.isStreaming) {
-            return [
-              ...prev.slice(0, -1),
-              {
-                ...lastMsg,
-                content: lastMsg.content + data.delta,
-                currentAction: undefined,
-                streamPhase: "responding",
-              },
-            ];
-          }
-          return prev;
-        });
+        {
+          const snapshot = activeStreamsRef.current.get(chatId) ?? {
+            id: `stream-${chatId}-${Date.now()}`,
+            content: "",
+            created_at: new Date().toISOString(),
+          };
+          activeStreamsRef.current.set(chatId, {
+            ...snapshot,
+            content: snapshot.content + (data.delta || ""),
+            currentAction: undefined,
+            streamPhase: "responding",
+          });
+          applyActiveStreamSnapshot(chatId);
+        }
         break;
       case "stream_end":
-        setMessages((prev) => {
-          const lastMsg = prev[prev.length - 1];
-          if (lastMsg?.isStreaming) {
-            return [
-              ...prev.slice(0, -1),
-              { ...lastMsg, isStreaming: false, streamPhase: undefined },
-            ];
+        {
+          const snapshot = activeStreamsRef.current.get(chatId);
+          if (snapshot && currentChatIdRef.current === chatId) {
+            setMessages((prev) => {
+              const withSnapshot = withStreamingSnapshot(prev, snapshot);
+              return withSnapshot.map((message) => (
+                message.id === snapshot.id
+                  ? { ...message, isStreaming: false, streamPhase: undefined, currentAction: undefined }
+                  : message
+              ));
+            });
           }
-          return prev;
-        });
+          activeStreamsRef.current.delete(chatId);
+          markChatStreaming(chatId, false);
+        }
         break;
       case "error":
-        setIsStreaming(false);
-        setMessages((prev) => {
+        {
           const errorText = data.error || "请求失败，请稍后重试。";
-          const lastMsg = prev[prev.length - 1];
-          if (lastMsg?.isStreaming) {
-            return [
-              ...prev.slice(0, -1),
-              {
-                ...lastMsg,
-                content: lastMsg.content || errorText,
-                currentAction: undefined,
-                isStreaming: false,
-                streamPhase: undefined,
-              },
-            ];
+          const snapshot = activeStreamsRef.current.get(chatId);
+          activeStreamsRef.current.delete(chatId);
+          markChatStreaming(chatId, false);
+
+          if (currentChatIdRef.current !== chatId) {
+            return;
           }
 
-          return [
-            ...prev,
-            {
-              id: `msg-${Date.now()}`,
-              role: "assistant",
-              content: errorText,
-              created_at: new Date().toISOString(),
-              isStreaming: false,
-            },
-          ];
-        });
+          setMessages((prev) => {
+            if (snapshot) {
+              const withSnapshot = withStreamingSnapshot(prev, {
+                ...snapshot,
+                content: snapshot.content || errorText,
+                currentAction: undefined,
+                streamPhase: undefined,
+              });
+              return withSnapshot.map((message) => (
+                message.id === snapshot.id
+                  ? { ...message, isStreaming: false, streamPhase: undefined, currentAction: undefined }
+                  : message
+              ));
+            }
+
+            return [
+              ...prev,
+              {
+                id: `msg-${Date.now()}`,
+                role: "assistant",
+                content: errorText,
+                created_at: new Date().toISOString(),
+                isStreaming: false,
+              },
+            ];
+          });
+        }
         break;
       case "status":
-        setTokenUsage({
-          used: data.tokens_used || 0,
-          total: data.tokens_total || workspaceInfo?.context_window || 256 * 1024,
-        });
-        setIsStreaming(false);
+        if (currentChatIdRef.current === chatId) {
+          setTokenUsage({
+            used: data.tokens_used || 0,
+            total: data.tokens_total || workspaceInfo?.context_window || 256 * 1024,
+          });
+        }
+        markChatStreaming(chatId, false);
         break;
     }
-  }, [workspaceInfo]);
+  }, [applyActiveStreamSnapshot, markChatStreaming, workspaceInfo]);
+
+  const loadChats = useCallback(async () => {
+    try {
+      const data = await fetchChats();
+      setChats(sortChatsByUpdatedAt(data));
+    } catch (error) {
+      console.error("Failed to load chats:", error);
+    }
+  }, []);
+
+  const loadWorkspaceInfo = useCallback(async () => {
+    try {
+      const data = await fetchWorkspaceInfo();
+      setWorkspaceInfo(data);
+      setTokenUsage((prev) => ({
+        used: prev.used,
+        total: data.context_window,
+      }));
+    } catch (error) {
+      console.error("Failed to load workspace info:", error);
+    }
+  }, []);
 
   const startStream = useCallback(async (chatId: string, payload: PendingOutboundMessage["payload"]) => {
-    streamAbortRef.current?.abort();
+    if (streamAbortControllersRef.current.has(chatId)) {
+      return;
+    }
+
     const controller = new AbortController();
-    streamAbortRef.current = controller;
+    streamAbortControllersRef.current.set(chatId, controller);
+    markChatStreaming(chatId, true);
 
     try {
       await streamChatMessage(chatId, payload, {
         signal: controller.signal,
-        onEvent: handleStreamEvent,
+        onEvent: (event) => handleStreamEvent(chatId, event),
       });
+      await loadChats();
     } catch (error) {
       if (controller.signal.aborted) {
         return;
       }
 
       console.error("Failed to stream chat message:", error);
-      handleStreamEvent({
+      handleStreamEvent(chatId, {
         type: "error",
         error: "请求失败，请稍后重试。",
       });
-      setIsStreaming(false);
     } finally {
-      if (streamAbortRef.current === controller) {
-        streamAbortRef.current = null;
+      if (streamAbortControllersRef.current.get(chatId) === controller) {
+        streamAbortControllersRef.current.delete(chatId);
       }
+      markChatStreaming(chatId, false);
     }
-  }, [handleStreamEvent]);
+  }, [handleStreamEvent, loadChats, markChatStreaming]);
 
   const handleSendMessage = async (
     message: string,
@@ -209,6 +302,10 @@ export default function Home() {
         console.error("Failed to create chat:", error);
         return;
       }
+    }
+
+    if (streamAbortControllersRef.current.has(targetChatId)) {
+      return;
     }
 
     // 添加用户消息到界面
@@ -235,21 +332,23 @@ export default function Home() {
   };
 
   const handleSelectChat = async (chatId: string) => {
-    streamAbortRef.current?.abort();
-    setIsStreaming(false);
+    currentChatIdRef.current = chatId;
     setCurrentChatId(chatId);
     // 加载聊天记录
     try {
-      const messages = await fetchMessages(chatId);
-      setMessages(messages);
+      const loadedMessages = await fetchMessages(chatId);
+      if (currentChatIdRef.current !== chatId) {
+        return;
+      }
+      const snapshot = activeStreamsRef.current.get(chatId);
+      setMessages(snapshot ? withStreamingSnapshot(loadedMessages, snapshot) : loadedMessages);
     } catch (error) {
       console.error("Failed to load messages:", error);
     }
   };
 
   const handleNewChat = async () => {
-    streamAbortRef.current?.abort();
-    setIsStreaming(false);
+    currentChatIdRef.current = null;
     setCurrentChatId(null);
     setMessages([]);
   };
@@ -261,9 +360,15 @@ export default function Home() {
 
     try {
       await Promise.all(chatIds.map((chatId) => deleteChat(chatId)));
+      chatIds.forEach((chatId) => {
+        streamAbortControllersRef.current.get(chatId)?.abort();
+        streamAbortControllersRef.current.delete(chatId);
+        activeStreamsRef.current.delete(chatId);
+      });
       setChats((prev) => prev.filter((chat) => !chatIds.includes(chat.id)));
 
       if (currentChatId && chatIds.includes(currentChatId)) {
+        currentChatIdRef.current = null;
         setCurrentChatId(null);
         setMessages([]);
       }
@@ -287,6 +392,7 @@ export default function Home() {
       const title = firstMessage.slice(0, 50) || "New Chat";
       const newChat = await createChat(title);
       setChats((prev) => sortChatsByUpdatedAt([newChat, ...prev]));
+      currentChatIdRef.current = newChat.id;
       setCurrentChatId(newChat.id);
       return newChat.id;
     } catch (error) {
@@ -299,7 +405,7 @@ export default function Home() {
     // 加载聊天列表
     loadChats();
     loadWorkspaceInfo();
-  }, []);
+  }, [loadChats, loadWorkspaceInfo]);
 
   useEffect(() => {
     if (!pendingOutbound) {
@@ -309,33 +415,15 @@ export default function Home() {
     setPendingOutbound(null);
   }, [pendingOutbound, startStream]);
 
-  const loadChats = async () => {
-    try {
-      const data = await fetchChats();
-      setChats(sortChatsByUpdatedAt(data));
-    } catch (error) {
-      console.error("Failed to load chats:", error);
-    }
-  };
-
-  const loadWorkspaceInfo = async () => {
-    try {
-      const data = await fetchWorkspaceInfo();
-      setWorkspaceInfo(data);
-      setTokenUsage((prev) => ({
-        used: prev.used,
-        total: data.context_window,
-      }));
-    } catch (error) {
-      console.error("Failed to load workspace info:", error);
-    }
-  };
-
   useEffect(() => {
+    const streamAbortControllers = streamAbortControllersRef.current;
     return () => {
-      streamAbortRef.current?.abort();
+      streamAbortControllers.forEach((controller) => controller.abort());
+      streamAbortControllers.clear();
     };
   }, []);
+
+  const isCurrentChatStreaming = currentChatId ? streamingChatIds.has(currentChatId) : false;
 
   return (
     <div className="flex h-screen bg-background">
@@ -344,6 +432,7 @@ export default function Home() {
         onClose={() => setIsSidebarOpen(false)}
         chats={chats}
         currentChatId={currentChatId}
+        streamingChatIds={streamingChatIds}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
         onDeleteChats={handleDeleteChats}
@@ -362,7 +451,7 @@ export default function Home() {
         <ChatArea
           messages={messages}
           onSendMessage={handleSendMessage}
-          isConnected={!isStreaming}
+          isConnected={!isCurrentChatStreaming}
           workspaceInfo={workspaceInfo}
           tokenUsage={tokenUsage}
         />

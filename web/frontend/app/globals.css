@@ -78,4 +78,16 @@
   .markdown-body em {
     @apply italic;
   }
+
+  .chat-message-item {
+    margin-bottom: 16px;
+  }
+
+  .chat-message-item[data-role="user"]:has(+ .chat-message-item[data-role="assistant"]) {
+    margin-bottom: 24px;
+  }
+
+  .chat-message-item:last-child {
+    margin-bottom: 0;
+  }
 }

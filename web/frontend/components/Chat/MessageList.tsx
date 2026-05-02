@@ -101,19 +101,19 @@ async function copyTextToClipboard(text: string): Promise<void> {
 
 function MarkdownMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
   return (
-    <div className="markdown-body text-[15px] leading-7 text-foreground">
+    <div className="markdown-body text-[15px] leading-[1.75] text-foreground">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
-          ul: ({ children }) => <ul className="mb-4 list-disc pl-6 space-y-2">{children}</ul>,
-          ol: ({ children }) => <ol className="mb-4 list-decimal pl-6 space-y-2">{children}</ol>,
-          li: ({ children }) => <li className="marker:text-muted-foreground">{children}</li>,
-          h1: ({ children }) => <h1 className="mb-4 mt-6 text-2xl font-semibold first:mt-0">{children}</h1>,
-          h2: ({ children }) => <h2 className="mb-3 mt-6 text-xl font-semibold first:mt-0">{children}</h2>,
-          h3: ({ children }) => <h3 className="mb-3 mt-5 text-lg font-semibold first:mt-0">{children}</h3>,
+          p: ({ children }) => <p className="mb-3 leading-[1.75] last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-6 leading-[1.75]">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-6 leading-[1.75]">{children}</ol>,
+          li: ({ children }) => <li className="mb-1 marker:text-muted-foreground last:mb-0">{children}</li>,
+          h1: ({ children }) => <h1 className="mb-2 mt-4 text-2xl font-semibold leading-[1.3] first:mt-0">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-2 mt-4 text-xl font-semibold leading-[1.3] first:mt-0">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-2 mt-4 text-lg font-semibold leading-[1.3] first:mt-0">{children}</h3>,
           blockquote: ({ children }) => (
-            <blockquote className="mb-4 border-l-4 border-border bg-muted/40 px-4 py-3 text-muted-foreground">
+            <blockquote className="my-4 border-l-4 border-border bg-muted/40 px-4 py-3 leading-[1.8] text-muted-foreground">
               {children}
             </blockquote>
           ),
@@ -127,7 +127,7 @@ function MarkdownMessage({ content, isStreaming }: { content: string; isStreamin
                 {children}
               </code>
             ),
-          pre: ({ children }) => <pre className="mb-4 mt-4 overflow-x-auto">{children}</pre>,
+          pre: ({ children }) => <pre className="my-4 overflow-x-auto leading-[1.8]">{children}</pre>,
           a: ({ href, children }) => (
             <a
               href={href}
@@ -183,8 +183,9 @@ function MessageItem({ message }: { message: Message }) {
 
   return (
     <div
+      data-role={message.role}
       className={cn(
-        "py-4 px-4 md:px-6",
+        "chat-message-item px-4 md:px-6",
         isUser ? "bg-muted/30" : "bg-background"
       )}
     >
@@ -207,8 +208,8 @@ function MessageItem({ message }: { message: Message }) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+        <div className={cn("min-w-0 flex-1", isAssistant ? "p-5" : "px-4 py-3")}>
+          <div className="mb-2 flex items-center gap-2">
             <span className="font-medium text-sm">
               {isUser ? "你" : "Hermes"}
             </span>
@@ -230,13 +231,13 @@ function MessageItem({ message }: { message: Message }) {
             {message.isStreaming && message.streamPhase === "thinking" ? (
               <ThinkingStatus currentAction={message.currentAction} />
             ) : isUser ? (
-              <div className="whitespace-pre-wrap text-[15px] leading-7">{message.content}</div>
+              <div className="whitespace-pre-wrap text-[15px] leading-[1.75]">{message.content}</div>
             ) : (
               <MarkdownMessage content={message.content} isStreaming={message.isStreaming} />
             )}
           </div>
 
-          <div className="mt-2 flex justify-end">
+          <div className="mt-3 flex justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -281,7 +282,7 @@ export function MessageList({ messages, bottomRef }: MessageListProps) {
 
   return (
     <TooltipProvider delayDuration={120}>
-      <div className="divide-y divide-border/50">
+      <div>
         {messages.map((message) => (
           <MessageItem key={message.id} message={message} />
         ))}

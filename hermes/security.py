@@ -15,10 +15,18 @@ class CommandSafety(Enum):
 
 
 class SecurityManager:
-    def __init__(self, workdir: Path, strict_sandbox: bool = True):
-        self._workdir = workdir
+    def __init__(
+        self,
+        workdir: Path,
+        strict_sandbox: bool = True,
+        allowed_roots: list[Path] | None = None,
+    ):
+        self._workdir = workdir.resolve()
         self._strict_sandbox = strict_sandbox
-
+        roots = [self._workdir]
+        if allowed_roots:
+            roots.extend(root.resolve() for root in allowed_roots)
+        self._allowed_roots = roots
 
     def safe_path(self, p: str) -> Path:
         expanded = os.path.expanduser(p)
@@ -29,9 +37,7 @@ class SecurityManager:
             path = (self._workdir / expanded).resolve()
 
         if self._strict_sandbox:
-            try:
-                path.relative_to(self._workdir)
-            except ValueError:
+            if not self._is_within_allowed_roots(path):
                 raise SecurityError(f"路径逃出工作目录: {p} (WORKDIR: {self._workdir})")
 
         return path
@@ -39,11 +45,17 @@ class SecurityManager:
     def is_path_allowed(self, path: Path) -> bool:
         if not self._strict_sandbox:
             return True
-        try:
-            path.resolve().relative_to(self._workdir)
-            return True
-        except ValueError:
-            return False
+        return self._is_within_allowed_roots(path)
+
+    def _is_within_allowed_roots(self, path: Path) -> bool:
+        resolved = path.resolve()
+        for root in self._allowed_roots:
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
 
     def is_command_allowed(self, cmd: str) -> bool:
         if not cmd or not cmd.strip():

@@ -9,8 +9,9 @@ from hermes.app.ports import SkillInfo
 
 
 class FileSkillRepository:
-    def __init__(self, workdir: Path):
+    def __init__(self, workdir: Path, llm_wiki_path: Path | None = None):
         self._workdir = workdir
+        self._llm_wiki_path = llm_wiki_path
         self._skills: dict[str, SkillInfo] = {}
         self._slash_commands: dict[str, str] = {}
         self._active_skill: SkillInfo | None = None
@@ -82,6 +83,9 @@ class FileSkillRepository:
         version = meta.get("version", "1.0.0")
         slash_command = meta.get("slash_command", f"/{name}")
         metadata = {k: v for k, v in meta.items() if k not in ["name", "description", "version", "slash_command"]}
+        instructions = self._render_skill_instructions(name, instructions)
+        if name == "llm-wiki" and self._llm_wiki_path:
+            metadata["wiki_path"] = str(self._llm_wiki_path)
 
         return SkillInfo(
             name=name,
@@ -120,3 +124,8 @@ class FileSkillRepository:
             self._active_skill = skill
             return True
         return False
+
+    def _render_skill_instructions(self, name: str, instructions: str) -> str:
+        if name != "llm-wiki" or not self._llm_wiki_path:
+            return instructions
+        return instructions.replace("{{LLM_WIKI_PATH}}", str(self._llm_wiki_path))

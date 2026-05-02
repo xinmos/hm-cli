@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Check,
   Download,
@@ -131,13 +131,13 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
 
   const visibleSkills = activeTab === "market" ? visibleMarketSkills : visibleInstalledSkills;
 
-  const loadInstalledSkills = async () => {
+  const loadInstalledSkills = useCallback(async () => {
     const installed = await fetchLocalSkills();
     setInstalledSkills(installed);
     return installed;
-  };
+  }, []);
 
-  const loadMarketSkills = async (sourceId: string, preferredSelectedId?: string | null) => {
+  const loadMarketSkills = useCallback(async (sourceId: string, preferredSelectedId?: string | null) => {
     setIsMarketLoading(true);
     setError("");
     try {
@@ -161,9 +161,9 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
     } finally {
       setIsMarketLoading(false);
     }
-  };
+  }, [activeTab]);
 
-  const loadSkills = async () => {
+  const loadSkills = useCallback(async () => {
     setIsLoading(true);
     setError("");
     try {
@@ -179,10 +179,12 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
       await loadMarketSkills(nextSourceId);
 
       if (activeTab === "installed") {
-        const nextInstalled = selected?.kind === "installed"
-          ? installed.find((skill) => skill.path === selected.skill.path)
-          : installed[0];
-        setSelected(nextInstalled ? { kind: "installed", skill: nextInstalled } : null);
+        setSelected((prev) => {
+          const nextInstalled = prev?.kind === "installed"
+            ? installed.find((skill) => skill.path === prev.skill.path)
+            : installed[0];
+          return nextInstalled ? { kind: "installed", skill: nextInstalled } : null;
+        });
       }
     } catch (loadError) {
       console.error("Failed to load skills:", loadError);
@@ -190,7 +192,7 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [activeTab, loadInstalledSkills, loadMarketSkills, marketSourceId]);
 
   const selectTab = (tab: SkillTab) => {
     setActiveTab(tab);
@@ -276,7 +278,7 @@ export function SkillsPanel({ isOpen, onClose }: SkillsPanelProps) {
     if (isOpen) {
       void loadSkills();
     }
-  }, [isOpen]);
+  }, [isOpen, loadSkills]);
 
   if (!isOpen) return null;
 

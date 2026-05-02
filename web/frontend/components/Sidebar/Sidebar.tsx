@@ -14,6 +14,7 @@ interface SidebarProps {
   onClose: () => void;
   chats: Chat[];
   currentChatId: string | null;
+  streamingChatIds?: Set<string>;
   onSelectChat: (chatId: string) => void;
   onNewChat: () => void;
   onDeleteChats?: (chatIds: string[]) => Promise<void>;
@@ -25,6 +26,7 @@ export function Sidebar({
   onClose,
   chats,
   currentChatId,
+  streamingChatIds,
   onSelectChat,
   onNewChat,
   onDeleteChats,
@@ -160,47 +162,63 @@ export function Sidebar({
                       {group}
                     </h3>
                     <div className="space-y-0.5">
-                      {groupChats.map((chat) => (
-                        <div
-                          key={chat.id}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            setContextMenu({ chat, x: event.clientX, y: event.clientY });
-                          }}
-                          className={cn(
-                            "flex w-full items-center rounded text-sm transition-colors",
-                            currentChatId === chat.id
-                              ? "bg-white shadow-sm"
-                              : "hover:bg-white/50"
-                          )}
-                        >
-                          {editingChatId === chat.id ? (
-                            <div className="w-full px-2 py-1.5">
-                              <input
-                                autoFocus
-                                value={editingTitle}
-                                onChange={(e) => setEditingTitle(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    void handleRenameSubmit(chat.id);
-                                  } else if (e.key === "Escape") {
-                                    setEditingChatId(null);
-                                  }
-                                }}
-                                onBlur={() => void handleRenameSubmit(chat.id)}
-                                className="w-full rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
-                              />
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => onSelectChat(chat.id)}
-                              className="min-w-0 flex-1 overflow-hidden px-2 py-1.5 text-left"
-                            >
-                              <div className="truncate pr-1">{chat.title}</div>
-                            </button>
-                          )}
-                        </div>
-                      ))}
+                      {groupChats.map((chat) => {
+                        const isStreaming = streamingChatIds?.has(chat.id) ?? false;
+
+                        return (
+                          <div
+                            key={chat.id}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              setContextMenu({ chat, x: event.clientX, y: event.clientY });
+                            }}
+                            className={cn(
+                              "flex w-full items-center rounded px-2 py-1.5 text-sm transition-colors",
+                              currentChatId === chat.id
+                                ? "bg-white shadow-sm"
+                                : "hover:bg-white/50"
+                            )}
+                          >
+                            {editingChatId === chat.id ? (
+                              <div className="w-full">
+                                <input
+                                  autoFocus
+                                  value={editingTitle}
+                                  onChange={(e) => setEditingTitle(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      void handleRenameSubmit(chat.id);
+                                    } else if (e.key === "Escape") {
+                                      setEditingChatId(null);
+                                    }
+                                  }}
+                                  onBlur={() => void handleRenameSubmit(chat.id)}
+                                  className="w-full rounded border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-ring"
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectChat(chat.id)}
+                                  className="min-w-0 flex-1 overflow-hidden text-left"
+                                >
+                                  <span className="block truncate pr-1">{chat.title}</span>
+                                </button>
+                                <div className="ml-2 flex h-5 w-4 shrink-0 items-center justify-center">
+                                  {isStreaming && (
+                                    <span
+                                      aria-label="正在执行"
+                                      title="正在执行"
+                                      className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.12)]"
+                                    />
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );

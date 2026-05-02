@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   Archive,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
@@ -10,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  FolderOpen,
   Info,
   Key,
   ListTree,
@@ -50,8 +52,12 @@ import {
   deleteChat,
   fetchChats,
   fetchModelConfig,
+  fetchWikiConfig,
+  initializeWiki,
   saveModelConfig,
+  saveWikiConfig,
   type ModelConfig,
+  type WikiConfig,
 } from "@/lib/api";
 
 interface SettingsPanelProps {
@@ -61,6 +67,7 @@ interface SettingsPanelProps {
 
 type SettingsCategory =
   | "model"
+  | "knowledge"
   | "permissions"
   | "data";
 
@@ -166,6 +173,9 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [newModelName, setNewModelName] = useState("");
   const [toast, setToast] = useState<ToastState>(null);
+  const [wikiConfig, setWikiConfig] = useState<WikiConfig | null>(null);
+  const [wikiPathDraft, setWikiPathDraft] = useState(".hermes/llm-wiki");
+  const [isInitializingWiki, setIsInitializingWiki] = useState(false);
 
   const [dataTab, setDataTab] = useState<DataTab>("overview");
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -204,6 +214,16 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         setSaveStatus("error");
       });
 
+    fetchWikiConfig()
+      .then((response) => {
+        if (cancelled) return;
+        setWikiConfig(response);
+        setWikiPathDraft(response.path);
+      })
+      .catch((error) => {
+        console.error("Failed to load llm-wiki config:", error);
+      });
+
     fetchChats()
       .then((chats) => {
         if (cancelled) return;
@@ -235,18 +255,30 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
     try {
       const validationError = validateModelSettings(modelSettings);
-      if (validationError) {
+      if (activeCategory === "model" && validationError) {
         setSaveStatus("error");
         return;
       }
 
-      const response = await saveModelConfig(normalizeModelSettings(modelSettings));
-      setModelSettings(response.config);
-      setEnvSettings(response.env_masked);
-      const settings = {
-        permissions: permissionSettings,
-      };
-      localStorage.setItem("hermes-settings", JSON.stringify(settings));
+      if (activeCategory === "model") {
+        const response = await saveModelConfig(normalizeModelSettings(modelSettings));
+        setModelSettings(response.config);
+        setEnvSettings(response.env_masked);
+      } else if (activeCategory === "knowledge") {
+        const path = wikiPathDraft.trim();
+        if (!path) {
+          setSaveStatus("error");
+          return;
+        }
+        const response = await saveWikiConfig(path);
+        setWikiConfig(response);
+        setWikiPathDraft(response.path);
+      } else {
+        const settings = {
+          permissions: permissionSettings,
+        };
+        localStorage.setItem("hermes-settings", JSON.stringify(settings));
+      }
       setSaveStatus("success");
       setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (e) {
@@ -258,6 +290,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
   const categories = [
     { id: "model" as const, name: "模型配置", icon: Key },
+    { id: "knowledge" as const, name: "知识库", icon: FolderOpen },
     { id: "permissions" as const, name: "权限设置", icon: Shield },
     { id: "data" as const, name: "数据管理", icon: Database },
   ];
@@ -295,6 +328,168 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const showToast = (message: string, type: ToastType = "success") => {
     setToast({ message, type });
     window.setTimeout(() => setToast(null), 2600);
+  };
+
+  const handleInitializeWiki = async () => {
+    const path = wikiPathDraft.trim();
+    if (!path) {
+      showToast("先填写一个知识库目录", "error");
+      return;
+    }
+
+    setIsInitializingWiki(true);
+    setSaveStatus("idle");
+    try {
+      const response = await initializeWiki(path);
+      setWikiConfig(response);
+      setWikiPathDraft(response.path);
+      setSaveStatus("success");
+      const createdCount =
+        (response.init_result?.created_dirs.length || 0) +
+        (response.init_result?.created_files.length || 0);
+      showToast(createdCount > 0 ? "知识库已初始化" : "知识库结构已就绪");
+    } catch (error) {
+      console.error("Failed to initialize llm-wiki:", error);
+      setSaveStatus("error");
+      showToast("初始化失败，请检查目录权限", "error");
+    } finally {
+      setIsInitializingWiki(false);
+    }
+  };
+
+  const renderKnowledgeSettings = () => {
+    const draftPath = wikiPathDraft.trim();
+    const isDefaultPath = wikiConfig && draftPath === wikiConfig.default_path;
+    const resolvedPath = wikiConfig?.effective_path || wikiPathDraft || ".hermes/llm-wiki";
+    const pathChanged = wikiConfig ? draftPath !== wikiConfig.path : false;
+    const needsInitialization = pathChanged || !wikiConfig?.is_initialized;
+    const statusTone = wikiConfig?.is_initialized && !pathChanged ? "text-emerald-600" : "text-amber-600";
+    const missingPreview = wikiConfig?.missing_items.slice(0, 4) || [];
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-lg font-medium mb-1">知识库</h3>
+          <p className="text-sm text-muted-foreground">配置 llm-wiki 工作区，用于 AI 知识管理和问答</p>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-5">
+          {/* What is llm-wiki */}
+          <div className="rounded-md border bg-muted/20 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <BookOpen className="h-4 w-4 text-muted-foreground" />
+              <span>LLM Wiki 知识库</span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Karpathy 提出的 LLM Wiki，是让模型把原始资料编译成可持续更新的 Markdown 知识库。它会沉淀摘要、概念和关联，让后续问答基于逐步生长的 wiki。
+            </p>
+            <div className="grid gap-2 pt-2 md:grid-cols-3">
+              <div className="rounded-md border bg-background/70 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                  <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>收集资料</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  用 Obsidian 打开知识库目录，把文章、笔记或摘录放进 raw/sources/。
+                </p>
+              </div>
+              <div className="rounded-md border bg-background/70 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>让 AI 处理</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  在聊天里说“处理知识库里的新文章”，Hermes 会整理到 wiki/。
+                </p>
+              </div>
+              <div className="rounded-md border bg-background/70 p-3">
+                <div className="mb-1 flex items-center gap-1.5 text-xs font-medium">
+                  <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>基于知识库问答</span>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  提问时说“根据知识库回答”，AI 会优先读取已编译的 wiki。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Directory config */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">知识库目录</label>
+            <Input
+              value={wikiPathDraft}
+              placeholder=".hermes/llm-wiki"
+              onChange={(event) => setWikiPathDraft(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              实际路径：<span className="font-mono text-foreground">{resolvedPath}</span>
+            </p>
+            {wikiConfig?.env_path && (
+              <p className="text-xs text-amber-600">
+                环境变量正在覆盖配置：{wikiConfig.env_path}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {!isDefaultPath && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setWikiPathDraft(wikiConfig?.default_path || ".hermes/llm-wiki")}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" />
+                恢复默认目录
+              </Button>
+            )}
+            {needsInitialization && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleInitializeWiki}
+                disabled={isInitializingWiki || !draftPath}
+              >
+                {isInitializingWiki ? (
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                )}
+                初始化知识库
+              </Button>
+            )}
+          </div>
+
+          {/* Note */}
+          <div className="rounded-md border-l-2 border-l-primary bg-muted/20 p-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {wikiConfig?.is_initialized && !pathChanged ? (
+                <Check className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <ShieldAlert className="h-4 w-4 text-amber-600" />
+              )}
+              <span>目录状态</span>
+            </div>
+            <p className={cn("text-xs leading-relaxed", statusTone)}>
+              {pathChanged
+                ? "路径还未保存。可以直接点击初始化，Hermes 会保存这个目录并补齐结构。"
+                : wikiConfig?.status_message || "正在读取目录状态..."}
+            </p>
+            {!pathChanged && missingPreview.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                缺少：{missingPreview.join("、")}
+                {wikiConfig && wikiConfig.missing_items.length > missingPreview.length
+                  ? ` 等 ${wikiConfig.missing_items.length} 项`
+                  : ""}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Render model settings
@@ -1078,6 +1273,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     switch (activeCategory) {
       case "model":
         return renderModelSettings();
+      case "knowledge":
+        return renderKnowledgeSettings();
       case "permissions":
         return renderPermissionSettings();
       case "data":

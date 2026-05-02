@@ -42,6 +42,7 @@ HERMES_TIMEOUT=120        # Command timeout (seconds)
 HERMES_MAX_OUTPUT=50000   # Max output chars
 HERMES_MAX_LINES=500      # Max output lines
 HERMES_STRICT=true        # Strict sandbox mode
+HERMES_LLM_WIKI_PATH=.hermes/llm-wiki  # Optional llm-wiki knowledge base path
 
 # Optional: Context Management
 HERMES_CONTEXT_THRESHOLD=30
@@ -51,6 +52,20 @@ HERMES_TASKS_PATH=.hermes/tasks.json
 # Optional: Debug
 HERMES_DEBUG=1
 ```
+
+You can also persist the llm-wiki path in `.hermes/settings.json`:
+
+```json
+{
+  "llm_wiki": {
+    "path": "~/Documents/obisidian-llm"
+  }
+}
+```
+
+The built-in `llm-wiki` skill can initialize that directory on a new machine
+from bundled templates. In chat, ask Hermes to initialize llm-wiki, or ask a
+question with "通过知识库回答" to have it use the configured knowledge base.
 
 ## Philosophy
 
