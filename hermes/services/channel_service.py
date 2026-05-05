@@ -17,6 +17,7 @@ from hermes.app.ports import (
 from hermes.services.chat_service import ChatService
 
 ChannelResponder = Callable[[list[Message], str], Iterable[str]]
+_CLEAR_CONTEXT_COMMANDS = {"/clear", "/reset", "清空上下文", "清空当前上下文"}
 
 
 class ChannelConversationService:
@@ -60,6 +61,11 @@ class ChannelConversationService:
             raise ValueError("Channel sender id cannot be empty")
         if not inbound.text:
             raise ValueError("Channel message text cannot be empty")
+
+        command_reply = self._handle_command(inbound)
+        if command_reply:
+            yield command_reply
+            return
 
         link = self._ensure_link(inbound)
         history = self._build_agent_history(
@@ -139,6 +145,52 @@ class ChannelConversationService:
     def _touch_link(self, link: ChannelConversationLink) -> None:
         link.updated_at = self._clock().isoformat()
         self._link_store.save_link(link)
+
+    def _handle_command(
+        self, message: ChannelInboundMessage
+    ) -> ChannelOutboundMessage | None:
+        command = message.text.strip().lower()
+        if command not in _CLEAR_CONTEXT_COMMANDS:
+            return None
+
+        link = self._reset_link(message)
+        return ChannelOutboundMessage(
+            channel=message.channel,
+            conversation_id=message.conversation_id,
+            text="已清空当前对话上下文。",
+            chat_id=link.chat_id,
+            reply_to_message_id=message.message_id,
+            metadata={
+                "sender_id": message.sender_id,
+                "command": "clear_context",
+            },
+        )
+
+    def _reset_link(self, message: ChannelInboundMessage) -> ChannelConversationLink:
+        key = ChannelConversationKey(
+            channel=message.channel,
+            conversation_id=message.conversation_id,
+        )
+        existing = self._link_store.get_link(key)
+        now = self._clock().isoformat()
+        chat = self._chat_service.create_chat(
+            title=f"{message.channel}:{message.conversation_id}",
+            project_id=None,
+        )
+        link = ChannelConversationLink(
+            channel=message.channel,
+            conversation_id=message.conversation_id,
+            chat_id=chat.id,
+            created_at=existing.created_at if existing else now,
+            updated_at=now,
+            metadata={
+                "created_by": "channel",
+                "reset_at": now,
+                "previous_chat_id": existing.chat_id if existing else None,
+            },
+        )
+        self._link_store.save_link(link)
+        return link
 
     def _build_record(
         self,

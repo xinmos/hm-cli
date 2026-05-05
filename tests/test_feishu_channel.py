@@ -1,5 +1,6 @@
 from hermes.channels.feishu import (
     FeishuBotConfig,
+    _build_markdown_card,
     _clean_feishu_text,
     _extract_message_text,
     read_saved_feishu_config,
@@ -17,6 +18,8 @@ def test_feishu_config_reads_env(monkeypatch):
     monkeypatch.setenv("HERMES_FEISHU_APP_SECRET", "secret")
     monkeypatch.setenv("HERMES_FEISHU_DOMAIN", "https://open.larksuite.com")
     monkeypatch.setenv("HERMES_FEISHU_AUTO_RECONNECT", "false")
+    monkeypatch.setenv("HERMES_FEISHU_ENABLE_MARKDOWN", "false")
+    monkeypatch.setenv("HERMES_FEISHU_ENABLE_STREAMING", "false")
 
     config = FeishuBotConfig.from_env()
 
@@ -24,6 +27,8 @@ def test_feishu_config_reads_env(monkeypatch):
     assert config.app_secret == "secret"
     assert config.domain == "https://open.larksuite.com"
     assert config.auto_reconnect is False
+    assert config.enable_markdown is False
+    assert config.enable_streaming is False
 
 
 def test_feishu_config_reads_saved_web_settings(tmp_path, monkeypatch):
@@ -38,6 +43,8 @@ def test_feishu_config_reads_saved_web_settings(tmp_path, monkeypatch):
             "encrypt_key": "key",
             "domain": "https://open.feishu.cn",
             "auto_reconnect": False,
+            "enable_markdown": False,
+            "enable_streaming": False,
         },
     )
 
@@ -48,7 +55,22 @@ def test_feishu_config_reads_saved_web_settings(tmp_path, monkeypatch):
     assert config.verification_token == "token"
     assert config.encrypt_key == "key"
     assert config.auto_reconnect is False
+    assert config.enable_markdown is False
+    assert config.enable_streaming is False
     assert read_saved_feishu_config(tmp_path)["app_id"] == "saved-appid"
+
+
+def test_feishu_markdown_card_uses_card_json_2():
+    card = _build_markdown_card("**你好**", streaming=True)
+
+    assert card["schema"] == "2.0"
+    assert card["config"]["streaming_mode"] is True
+    assert card["config"]["update_multi"] is True
+    assert card["body"]["elements"][0] == {
+        "tag": "markdown",
+        "element_id": "hermes_answer",
+        "content": "**你好**",
+    }
 
 
 def test_feishu_text_message_extraction():

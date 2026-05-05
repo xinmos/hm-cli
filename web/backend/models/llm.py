@@ -89,6 +89,8 @@ class FeishuBotConfigPayload(BaseModel):
     encrypt_key: str | None = None
     domain: str = Field(default="https://open.feishu.cn", min_length=1)
     auto_reconnect: bool = True
+    enable_markdown: bool = True
+    enable_streaming: bool = True
 
 
 class FeishuBotConfigResponse(BaseModel):

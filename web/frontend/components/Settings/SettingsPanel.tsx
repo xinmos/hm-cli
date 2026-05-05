@@ -111,6 +111,8 @@ const defaultFeishuSettings: FeishuBotConfig = {
   encrypt_key: "",
   domain: "https://open.feishu.cn",
   auto_reconnect: true,
+  enable_markdown: true,
+  enable_streaming: true,
 };
 
 interface PermissionSettings {
@@ -986,7 +988,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             <span>飞书机器人</span>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            使用官方 lark-oapi SDK 的 WebSocket 长连接接收消息事件，回复文本消息，聊天记录会写入 .hermes/feishu。
+            使用官方 lark-oapi SDK 的 WebSocket 长连接接收消息事件，回复会优先使用 CardKit 流式 Markdown 卡片，聊天记录会写入 .hermes/feishu。
           </p>
         </div>
 
@@ -1102,6 +1104,32 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               }
             />
           </div>
+
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              {fieldLabel("Markdown 卡片", "使用飞书 Card JSON 2.0 的 markdown 组件渲染回复内容。")}
+              <p className="text-xs text-muted-foreground">对应 HERMES_FEISHU_ENABLE_MARKDOWN</p>
+            </div>
+            <Switch
+              checked={feishuSettings.enable_markdown}
+              onCheckedChange={(checked) =>
+                setFeishuSettings((prev) => ({ ...prev, enable_markdown: checked }))
+              }
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              {fieldLabel("流式卡片", "使用 CardKit 卡片实体逐步更新 markdown 内容，需要 cardkit:card:write 权限。")}
+              <p className="text-xs text-muted-foreground">对应 HERMES_FEISHU_ENABLE_STREAMING</p>
+            </div>
+            <Switch
+              checked={feishuSettings.enable_streaming}
+              onCheckedChange={(checked) =>
+                setFeishuSettings((prev) => ({ ...prev, enable_streaming: checked }))
+              }
+            />
+          </div>
         </div>
 
         <div className="rounded-md border-l-2 border-l-primary bg-muted/20 p-4 space-y-2">
@@ -1111,7 +1139,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
             保存后在终端运行 <span className="font-mono text-foreground">uv run python cli.py feishu</span>。
-            需要在飞书开放平台开启机器人能力和消息事件订阅。
+            需要在飞书开放平台开启机器人能力、消息事件订阅；流式输出还需要创建与更新卡片权限。
           </p>
         </div>
       </div>

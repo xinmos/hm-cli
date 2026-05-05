@@ -73,11 +73,14 @@ HERMES_FEISHU_APP_ID=your-feishu-app-id
 HERMES_FEISHU_APP_SECRET=your-feishu-app-secret
 HERMES_FEISHU_DOMAIN=https://open.feishu.cn
 HERMES_FEISHU_AUTO_RECONNECT=true
+HERMES_FEISHU_ENABLE_MARKDOWN=true
+HERMES_FEISHU_ENABLE_STREAMING=true
 ```
 
 QQ and Feishu bot settings can also be saved from the Web UI in Settings ->
 Channel Configuration. Environment variables still take precedence over saved
-values.
+values. Feishu streaming replies use CardKit markdown cards and require the
+`cardkit:card:write` permission in the Feishu developer console.
 
 You can also persist the llm-wiki path in `.hermes/settings.json`:
 

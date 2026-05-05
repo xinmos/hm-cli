@@ -92,3 +92,59 @@ def test_channel_message_reuses_existing_chat(tmp_path):
     assert "first" in calls[1][0].content
     assert calls[1][1].content == "second"
     assert len(chat_service.list_messages(first.chat_id)) == 4
+
+
+def test_channel_clear_command_resets_current_context(tmp_path):
+    chat_service = ChatService(JsonChatStore(tmp_path / "chats"))
+    link_store = JsonChannelConversationStore(tmp_path / "channels")
+    calls = []
+
+    def responder(history, message):
+        calls.append(history)
+        yield "reply"
+
+    service = ChannelConversationService(
+        chat_service,
+        link_store,
+        responder,
+        clock=lambda: datetime(2026, 5, 3, 12, 0, 0),
+    )
+
+    first = service.handle_inbound(
+        ChannelInboundMessage(
+            channel="feishu",
+            conversation_id="chat:c1",
+            sender_id="u1",
+            text="记住这句话",
+            message_id="m-1",
+        )
+    )
+    cleared = service.handle_inbound(
+        ChannelInboundMessage(
+            channel="feishu",
+            conversation_id="chat:c1",
+            sender_id="u1",
+            text="/clear",
+            message_id="m-2",
+        )
+    )
+    after_clear = service.handle_inbound(
+        ChannelInboundMessage(
+            channel="feishu",
+            conversation_id="chat:c1",
+            sender_id="u1",
+            text="现在还有上下文吗",
+            message_id="m-3",
+        )
+    )
+
+    assert cleared.text == "已清空当前对话上下文。"
+    assert cleared.chat_id != first.chat_id
+    assert after_clear.chat_id == cleared.chat_id
+    assert calls[0] == []
+    assert calls[1] == []
+    assert len(chat_service.list_messages(first.chat_id)) == 2
+    assert len(chat_service.list_messages(cleared.chat_id)) == 2
+    assert (
+        link_store.list_links("feishu")[0].metadata["previous_chat_id"] == first.chat_id
+    )

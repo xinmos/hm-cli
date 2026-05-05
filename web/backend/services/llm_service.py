@@ -211,6 +211,8 @@ class LLMApiService:
             "encrypt_key": "",
             "domain": "https://open.feishu.cn",
             "auto_reconnect": True,
+            "enable_markdown": True,
+            "enable_streaming": True,
         }
         data.update(saved)
         data.update(self._normalize_feishu_env(env))
@@ -218,15 +220,16 @@ class LLMApiService:
 
     def _normalize_feishu_env(self, env: dict) -> dict:
         normalized = dict(env)
-        value = normalized.get("auto_reconnect")
-        if isinstance(value, str):
-            normalized["auto_reconnect"] = value.strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "y",
-                "on",
-            }
+        for key in ("auto_reconnect", "enable_markdown", "enable_streaming"):
+            value = normalized.get(key)
+            if isinstance(value, str):
+                normalized[key] = value.strip().lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "y",
+                    "on",
+                }
         return normalized
 
     def _mask_secret(self, value: str) -> str:

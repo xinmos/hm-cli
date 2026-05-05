@@ -15,7 +15,7 @@ Hermes 的外部渠道入口复用同一条主链路：
 - `hermes.infra.persistence.json_channel_store.JsonChannelConversationStore`: JSON 文件映射存储。
 - `hermes.services.channel_service.ChannelConversationService`: 多渠道消息编排。
 - `hermes.channels.qq`: 基于官方 `qq-botpy` 的 QQ 运行器，支持频道 @、频道私信、QQ群 @、好友私聊。
-- `hermes.channels.feishu`: 基于官方 `lark-oapi` 的飞书运行器，通过 WebSocket 长连接接收消息事件并回复文本消息。
+- `hermes.channels.feishu`: 基于官方 `lark-oapi` 的飞书运行器，通过 WebSocket 长连接接收消息事件，优先使用 CardKit 流式 Markdown 卡片回复。
 
 ## QQ 官方机器人
 
@@ -71,9 +71,11 @@ HERMES_FEISHU_APP_ID=你的 App ID
 HERMES_FEISHU_APP_SECRET=你的 App Secret
 HERMES_FEISHU_DOMAIN=https://open.feishu.cn
 HERMES_FEISHU_AUTO_RECONNECT=true
+HERMES_FEISHU_ENABLE_MARKDOWN=true
+HERMES_FEISHU_ENABLE_STREAMING=true
 ```
 
-也可以在 Web 页面打开“设置 -> 渠道配置”，填写 App ID、App Secret、事件订阅 Token、Encrypt Key 和 OpenAPI 域名。页面配置会保存到 `.hermes/settings.json` 的 `feishu_bot` 节点；如果同时设置环境变量，环境变量优先。
+也可以在 Web 页面打开“设置 -> 渠道配置”，填写 App ID、App Secret、事件订阅 Token、Encrypt Key、OpenAPI 域名和输出模式。页面配置会保存到 `.hermes/settings.json` 的 `feishu_bot` 节点；如果同时设置环境变量，环境变量优先。
 
 启动：
 
@@ -81,14 +83,25 @@ HERMES_FEISHU_AUTO_RECONNECT=true
 uv run python cli.py feishu
 ```
 
-飞书渠道使用官方 SDK 的 WebSocket 长连接接收 `im.message.receive_v1` 事件，不需要额外暴露 HTTP webhook。需要在飞书开放平台启用机器人能力，并订阅“接收消息”事件。
+飞书渠道使用官方 SDK 的 WebSocket 长连接接收 `im.message.receive_v1` 事件，不需要额外暴露 HTTP webhook。需要在飞书开放平台启用机器人能力，并订阅“接收消息”事件。默认回复使用 Card JSON 2.0 的 `markdown` 组件渲染 Markdown；启用流式输出时会先创建 CardKit 卡片实体，再把模型输出的累计文本写入同一个 markdown 组件。这个模式需要在开放平台授予“创建与更新卡片 / `cardkit:card:write`”权限。
 
 默认支持文本消息和富文本 `post` 消息解析，会自动去掉 @ 机器人标记。会话映射规则：
 
 - 群聊：`chat:<chat_id>`
 - 单聊：`chat:<chat_id>`，如果事件没有 `chat_id` 则回退到 `chat:<sender_id>`
 
-飞书渠道的聊天数据存储在 `.hermes/feishu/`，不会和 Web UI、QQ 渠道的数据混在一起。飞书消息回复使用平台文本消息格式；如果后续平台开放流式或消息编辑能力，可以复用核心 `ChannelConversationService.stream_inbound()` 做平台侧增量更新。
+飞书渠道的聊天数据存储在 `.hermes/feishu/`，不会和 Web UI、QQ 渠道的数据混在一起。若流式卡片不可用，适配器会退回一次性 Markdown 卡片；如果关闭 Markdown 卡片，则退回平台文本消息。
+
+## 渠道命令
+
+渠道消息在进入模型前会先识别命令。当前支持：
+
+- `/clear`
+- `/reset`
+- `清空上下文`
+- `清空当前上下文`
+
+这些命令会清空当前渠道会话上下文，也就是为当前 `channel + conversation_id` 创建一个新的 Hermes chat 并更新映射；旧 chat 不会被删除，仍留在本地数据目录中。
 
 ## 适配器接入要点
 

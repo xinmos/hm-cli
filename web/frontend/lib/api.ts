@@ -133,6 +133,8 @@ export interface FeishuBotConfig {
   encrypt_key: string | null;
   domain: string;
   auto_reconnect: boolean;
+  enable_markdown: boolean;
+  enable_streaming: boolean;
 }
 
 export interface FeishuBotConfigResponse {

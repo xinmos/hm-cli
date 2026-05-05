@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Thread
+from time import monotonic
 from typing import Any
+from uuid import uuid4
 
 import orjson
 
@@ -24,6 +28,9 @@ from hermes.services.chat_service import ChatService
 
 
 _AT_TAG_PATTERN = re.compile(r"<at\b[^>]*>.*?</at>")
+_STREAM_ELEMENT_ID = "hermes_answer"
+_STREAM_FLUSH_INTERVAL_SECONDS = 0.8
+_STREAM_FLUSH_MIN_CHARS = 48
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,8 @@ class FeishuBotConfig:
     encrypt_key: str | None = None
     domain: str = "https://open.feishu.cn"
     auto_reconnect: bool = True
+    enable_markdown: bool = True
+    enable_streaming: bool = True
 
     @property
     def channel(self) -> str:
@@ -77,6 +86,18 @@ class FeishuBotConfig:
                 "LARK_AUTO_RECONNECT",
                 default=_bool_config(saved, "auto_reconnect", True),
             ),
+            enable_markdown=_env_bool(
+                "HERMES_FEISHU_ENABLE_MARKDOWN",
+                "FEISHU_ENABLE_MARKDOWN",
+                "LARK_ENABLE_MARKDOWN",
+                default=_bool_config(saved, "enable_markdown", True),
+            ),
+            enable_streaming=_env_bool(
+                "HERMES_FEISHU_ENABLE_STREAMING",
+                "FEISHU_ENABLE_STREAMING",
+                "LARK_ENABLE_STREAMING",
+                default=_bool_config(saved, "enable_streaming", True),
+            ),
         )
 
 
@@ -92,6 +113,7 @@ class FeishuBotRunner:
         self._channel_service = channel_service
         self._log = log or (lambda message: None)
         self._client: Any | None = None
+        self._ws_client: Any | None = None
 
     def run(self) -> None:
         try:
@@ -117,7 +139,7 @@ class FeishuBotRunner:
             .register_p2_im_message_receive_v1(self._handle_message_event)
             .build()
         )
-        ws_client = lark.ws.Client(
+        self._ws_client = lark.ws.Client(
             self._config.app_id,
             self._config.app_secret,
             event_handler=event_handler,
@@ -125,15 +147,53 @@ class FeishuBotRunner:
             auto_reconnect=self._config.auto_reconnect,
         )
         self._log("Feishu bot websocket starting...")
-        ws_client.start()
+        try:
+            self._ws_client.start()
+        except KeyboardInterrupt:
+            self._log("Feishu bot stopping...")
+            self.stop()
+
+    def stop(self) -> None:
+        ws_client = self._ws_client
+        if ws_client is None:
+            return
+
+        try:
+            import lark_oapi.ws.client as ws_module
+        except ImportError:
+            self._ws_client = None
+            return
+
+        loop = getattr(ws_module, "loop", None)
+        if loop is None or loop.is_closed():
+            self._ws_client = None
+            return
+
+        try:
+            loop.run_until_complete(ws_client._disconnect())
+            _cancel_pending_lark_tasks(loop)
+        except Exception as exc:
+            self._log(f"Feishu bot stop warning: {exc}")
+        finally:
+            self._ws_client = None
 
     def _handle_message_event(self, data: Any) -> None:
+        Thread(target=self._process_message_event, args=(data,), daemon=True).start()
+
+    def _process_message_event(self, data: Any) -> None:
         inbound = _event_to_inbound(data)
         if inbound is None:
             self._log("Ignored unsupported Feishu message event")
             return
 
+        if self._config.enable_streaming and self._reply_streaming_markdown(inbound):
+            return
+
         outbound = self._handle_inbound(inbound)
+        if self._config.enable_markdown and self._reply_markdown_card(
+            inbound.message_id or "", outbound
+        ):
+            return
         self._reply_text(inbound.message_id or "", outbound)
 
     def _handle_inbound(self, message: ChannelInboundMessage) -> ChannelOutboundMessage:
@@ -149,6 +209,220 @@ class FeishuBotRunner:
                 reply_to_message_id=message.message_id,
                 metadata={"error": str(exc)},
             )
+
+    def _reply_streaming_markdown(self, inbound: ChannelInboundMessage) -> bool:
+        message_id = inbound.message_id or ""
+        if not message_id:
+            self._log("Cannot stream Feishu reply without message_id")
+            return False
+        if self._client is None:
+            self._log("Cannot stream Feishu reply before client is ready")
+            return False
+
+        try:
+            card_id = self._create_card(
+                _build_markdown_card("正在思考...", streaming=True)
+            )
+            self._reply_card_id(message_id, card_id)
+        except Exception as exc:
+            self._log(f"Feishu streaming card startup failed: {exc}")
+            return False
+
+        buffer = ""
+        sent = ""
+        sequence = 1
+        last_flush = 0.0
+        updates_ok = True
+        try:
+            for outbound in self._channel_service.stream_inbound(inbound):
+                buffer += outbound.text
+                now = monotonic()
+                should_flush = (
+                    now - last_flush >= _STREAM_FLUSH_INTERVAL_SECONDS
+                    or len(buffer) - len(sent) >= _STREAM_FLUSH_MIN_CHARS
+                )
+                if buffer != sent and should_flush and updates_ok:
+                    try:
+                        self._update_streaming_content(card_id, buffer, sequence)
+                        sent = buffer
+                        sequence += 1
+                        last_flush = now
+                    except Exception as exc:
+                        updates_ok = False
+                        self._log(f"Feishu streaming content update failed: {exc}")
+
+            final_text = _format_reply(buffer)
+            if updates_ok:
+                if final_text != sent:
+                    self._update_streaming_content(card_id, final_text, sequence)
+                    sequence += 1
+                self._finish_streaming_card(card_id, sequence)
+            else:
+                outbound = ChannelOutboundMessage(
+                    channel=inbound.channel,
+                    conversation_id=inbound.conversation_id,
+                    text=final_text,
+                    chat_id="",
+                    reply_to_message_id=inbound.message_id,
+                )
+                if self._config.enable_markdown and self._reply_markdown_card(
+                    message_id, outbound
+                ):
+                    return True
+                self._reply_text(message_id, outbound)
+            return True
+        except Exception as exc:
+            self._log(f"Feishu streaming reply failed: {exc}")
+            try:
+                self._update_streaming_content(
+                    card_id,
+                    "处理消息失败，请稍后再试。",
+                    sequence,
+                )
+                self._finish_streaming_card(card_id, sequence + 1)
+            except Exception as update_exc:
+                self._log(f"Feishu streaming error card update failed: {update_exc}")
+            return True
+
+    def _create_card(self, card: dict[str, Any]) -> str:
+        if self._client is None:
+            raise RuntimeError("Feishu client is not ready")
+
+        from lark_oapi.api.cardkit.v1 import CreateCardRequest, CreateCardRequestBody
+
+        request = (
+            CreateCardRequest.builder()
+            .request_body(
+                CreateCardRequestBody.builder()
+                .type("card_json")
+                .data(orjson.dumps(card).decode("utf-8"))
+                .build()
+            )
+            .build()
+        )
+        response = self._client.cardkit.v1.card.create(request)
+        _require_feishu_success(response, "create streaming card")
+        card_id = getattr(getattr(response, "data", None), "card_id", None)
+        if not card_id:
+            raise RuntimeError("Feishu create card response did not include card_id")
+        return str(card_id)
+
+    def _reply_card_id(self, message_id: str, card_id: str) -> None:
+        if self._client is None:
+            raise RuntimeError("Feishu client is not ready")
+
+        from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
+
+        content = orjson.dumps({"type": "card", "data": {"card_id": card_id}}).decode(
+            "utf-8"
+        )
+        request = (
+            ReplyMessageRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                ReplyMessageRequestBody.builder()
+                .msg_type("interactive")
+                .content(content)
+                .build()
+            )
+            .build()
+        )
+        response = self._client.im.v1.message.reply(request)
+        _require_feishu_success(response, "reply with streaming card")
+
+    def _update_streaming_content(
+        self, card_id: str, content: str, sequence: int
+    ) -> None:
+        if self._client is None:
+            raise RuntimeError("Feishu client is not ready")
+
+        from lark_oapi.api.cardkit.v1 import (
+            ContentCardElementRequest,
+            ContentCardElementRequestBody,
+        )
+
+        request = (
+            ContentCardElementRequest.builder()
+            .card_id(card_id)
+            .element_id(_STREAM_ELEMENT_ID)
+            .request_body(
+                ContentCardElementRequestBody.builder()
+                .uuid(uuid4().hex)
+                .content(_format_reply(content))
+                .sequence(sequence)
+                .build()
+            )
+            .build()
+        )
+        response = self._client.cardkit.v1.card_element.content(request)
+        _require_feishu_success(response, "update streaming card content")
+
+    def _finish_streaming_card(self, card_id: str, sequence: int) -> None:
+        if self._client is None:
+            raise RuntimeError("Feishu client is not ready")
+
+        from lark_oapi.api.cardkit.v1 import (
+            SettingsCardRequest,
+            SettingsCardRequestBody,
+        )
+
+        settings = orjson.dumps(
+            {
+                "config": {
+                    "streaming_mode": False,
+                    "update_multi": True,
+                    "width_mode": "fill",
+                }
+            }
+        ).decode("utf-8")
+        request = (
+            SettingsCardRequest.builder()
+            .card_id(card_id)
+            .request_body(
+                SettingsCardRequestBody.builder()
+                .uuid(uuid4().hex)
+                .settings(settings)
+                .sequence(sequence)
+                .build()
+            )
+            .build()
+        )
+        response = self._client.cardkit.v1.card.settings(request)
+        _require_feishu_success(response, "finish streaming card")
+
+    def _reply_markdown_card(
+        self, message_id: str, outbound: ChannelOutboundMessage
+    ) -> bool:
+        if not message_id:
+            self._log("Cannot reply Feishu message without message_id")
+            return False
+        if self._client is None:
+            self._log("Cannot reply Feishu message before client is ready")
+            return False
+
+        from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
+
+        content = orjson.dumps(
+            _build_markdown_card(_format_reply(outbound.text), streaming=False)
+        ).decode("utf-8")
+        request = (
+            ReplyMessageRequest.builder()
+            .message_id(message_id)
+            .request_body(
+                ReplyMessageRequestBody.builder()
+                .msg_type("interactive")
+                .content(content)
+                .build()
+            )
+            .build()
+        )
+        response = self._client.im.v1.message.reply(request)
+        if not response.success():
+            self._log(
+                f"Feishu markdown card reply failed: code={response.code}, msg={response.msg}"
+            )
+            return False
+        return True
 
     def _reply_text(self, message_id: str, outbound: ChannelOutboundMessage) -> None:
         if not message_id:
@@ -233,6 +507,24 @@ def read_env_feishu_config() -> dict[str, Any]:
             "HERMES_FEISHU_AUTO_RECONNECT",
             "FEISHU_AUTO_RECONNECT",
             "LARK_AUTO_RECONNECT",
+        ),
+    )
+    _set_if_present(
+        config,
+        "enable_markdown",
+        _env(
+            "HERMES_FEISHU_ENABLE_MARKDOWN",
+            "FEISHU_ENABLE_MARKDOWN",
+            "LARK_ENABLE_MARKDOWN",
+        ),
+    )
+    _set_if_present(
+        config,
+        "enable_streaming",
+        _env(
+            "HERMES_FEISHU_ENABLE_STREAMING",
+            "FEISHU_ENABLE_STREAMING",
+            "LARK_ENABLE_STREAMING",
         ),
     )
     return config
@@ -346,6 +638,43 @@ def _format_reply(text: str) -> str:
     return text.strip() or "我收到了，但暂时没有生成回复。"
 
 
+def _build_markdown_card(content: str, *, streaming: bool) -> dict[str, Any]:
+    return {
+        "schema": "2.0",
+        "config": {
+            "streaming_mode": streaming,
+            "update_multi": True,
+            "width_mode": "fill",
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "element_id": _STREAM_ELEMENT_ID,
+                    "content": _format_reply(content),
+                }
+            ]
+        },
+    }
+
+
+def _require_feishu_success(response: Any, action: str) -> None:
+    if response.success():
+        return
+    raise RuntimeError(
+        f"{action} failed: code={response.code}, msg={response.msg}, log_id={response.get_log_id()}"
+    )
+
+
+def _cancel_pending_lark_tasks(loop: asyncio.AbstractEventLoop) -> None:
+    pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+    if not pending:
+        return
+    for task in pending:
+        task.cancel()
+    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
+
 def _env(*names: str) -> str | None:
     for name in names:
         value = os.getenv(name)
@@ -390,6 +719,8 @@ def _filter_feishu_config(config: dict[str, Any]) -> dict[str, Any]:
         "encrypt_key",
         "domain",
         "auto_reconnect",
+        "enable_markdown",
+        "enable_streaming",
     }
     return {key: value for key, value in config.items() if key in allowed}
 
