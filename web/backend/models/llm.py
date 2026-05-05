@@ -61,3 +61,40 @@ class WikiConfigResponse(BaseModel):
     missing_items: list[str] = Field(default_factory=list)
     status_message: str = ""
     init_result: dict | None = None
+
+
+class QQBotConfigPayload(BaseModel):
+    app_id: str | None = None
+    secret: str | None = None
+    sandbox: bool = False
+    timeout: int = Field(default=5, ge=1)
+    enable_guild: bool = True
+    enable_direct: bool = True
+    enable_group: bool = True
+    enable_c2c: bool = True
+    enable_markdown: bool = True
+
+
+class QQBotConfigResponse(BaseModel):
+    config: QQBotConfigPayload
+    saved: dict
+    env: dict
+    env_masked: dict
+
+
+class FeishuBotConfigPayload(BaseModel):
+    app_id: str | None = None
+    app_secret: str | None = None
+    verification_token: str | None = None
+    encrypt_key: str | None = None
+    domain: str = Field(default="https://open.feishu.cn", min_length=1)
+    auto_reconnect: bool = True
+    enable_markdown: bool = True
+    enable_streaming: bool = True
+
+
+class FeishuBotConfigResponse(BaseModel):
+    config: FeishuBotConfigPayload
+    saved: dict
+    env: dict
+    env_masked: dict
