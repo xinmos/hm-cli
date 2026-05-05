@@ -27,6 +27,7 @@ class MessageResponse(BaseModel):
     content: str
     created_at: str
     tool_calls: list | None = None
+    metadata: dict | None = None
 
 
 class ChatAttachment(BaseModel):

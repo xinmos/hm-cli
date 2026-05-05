@@ -107,6 +107,41 @@ export interface WikiConfig {
   } | null;
 }
 
+export interface QQBotConfig {
+  app_id: string | null;
+  secret: string | null;
+  sandbox: boolean;
+  timeout: number;
+  enable_guild: boolean;
+  enable_direct: boolean;
+  enable_group: boolean;
+  enable_c2c: boolean;
+  enable_markdown: boolean;
+}
+
+export interface QQBotConfigResponse {
+  config: QQBotConfig;
+  saved: Record<string, unknown>;
+  env: Partial<QQBotConfig>;
+  env_masked: Partial<QQBotConfig>;
+}
+
+export interface FeishuBotConfig {
+  app_id: string | null;
+  app_secret: string | null;
+  verification_token: string | null;
+  encrypt_key: string | null;
+  domain: string;
+  auto_reconnect: boolean;
+}
+
+export interface FeishuBotConfigResponse {
+  config: FeishuBotConfig;
+  saved: Record<string, unknown>;
+  env: Partial<FeishuBotConfig>;
+  env_masked: Partial<FeishuBotConfig>;
+}
+
 export interface ModelSummary {
   id: string;
   name: string;
@@ -332,6 +367,18 @@ export async function fetchWikiConfig(): Promise<WikiConfig> {
   return res.json();
 }
 
+export async function fetchQQConfig(): Promise<QQBotConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/qq-config`);
+  if (!res.ok) throw new Error("Failed to fetch QQ config");
+  return res.json();
+}
+
+export async function fetchFeishuConfig(): Promise<FeishuBotConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/feishu-config`);
+  if (!res.ok) throw new Error("Failed to fetch Feishu config");
+  return res.json();
+}
+
 export async function fetchModels(): Promise<ModelSummary[]> {
   const res = await fetch(`${API_BASE}/api/models`);
   if (!res.ok) throw new Error("Failed to fetch models");
@@ -355,6 +402,26 @@ export async function saveWikiConfig(path: string): Promise<WikiConfig> {
     body: JSON.stringify({ path }),
   });
   if (!res.ok) throw new Error("Failed to save wiki config");
+  return res.json();
+}
+
+export async function saveQQConfig(config: QQBotConfig): Promise<QQBotConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/qq-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error("Failed to save QQ config");
+  return res.json();
+}
+
+export async function saveFeishuConfig(config: FeishuBotConfig): Promise<FeishuBotConfigResponse> {
+  const res = await fetch(`${API_BASE}/api/models/feishu-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error("Failed to save Feishu config");
   return res.json();
 }
 

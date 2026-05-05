@@ -28,7 +28,7 @@ class LangChainOpenAIBackend(AgentBackend):
             model=model_name,
             temperature=temperature,
             max_tokens=max_tokens,
-            request_timeout=timeout,
+            timeout=timeout,
             max_retries=max_retries,
             top_p=top_p,
             streaming=streaming,

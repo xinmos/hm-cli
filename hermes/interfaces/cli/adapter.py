@@ -15,14 +15,29 @@ from rich.theme import Theme
 
 from hermes.app import InteractionPort
 from hermes.app.bootstrap import ControlPlaneApp, assemble_control_plane
+from hermes.app.settings import Settings
+from hermes.channels.feishu import (
+    FeishuBotConfig,
+    FeishuBotRunner,
+    FeishuInteractionPort,
+    build_feishu_channel_service,
+)
+from hermes.channels.qq import (
+    QQBotConfig,
+    QQBotRunner,
+    QQInteractionPort,
+    build_qq_channel_service,
+)
 
-THEME = Theme({
-    "prompt": Style(color="green", bold=True),
-    "banner": Style(color="cyan", bold=True),
-    "info": Style(color="blue"),
-    "dim": Style(color="bright_black"),
-    "error": Style(color="red"),
-})
+THEME = Theme(
+    {
+        "prompt": Style(color="green", bold=True),
+        "banner": Style(color="cyan", bold=True),
+        "info": Style(color="blue"),
+        "dim": Style(color="bright_black"),
+        "error": Style(color="red"),
+    }
+)
 
 
 class RichInteractionPort(InteractionPort):
@@ -59,8 +74,7 @@ class RichInteractionPort(InteractionPort):
 
     def on_context_compressed(self, original: int, compressed: int) -> None:
         self._console.print(
-            f"[上下文压缩] {original} 条消息 ● {compressed} 条消息",
-            style="dim"
+            f"[上下文压缩] {original} 条消息 ● {compressed} 条消息", style="dim"
         )
 
 
@@ -95,14 +109,14 @@ class CLIAdapter:
 
     def _config_info(self) -> RenderableType:
         text = Text()
-        text.append(f"  Model:  ", style="dim")
+        text.append("  Model:  ", style="dim")
         text.append(f"{self._app.settings.model_name}\n", style="info")
-        text.append(f"  Tools:  ", style="dim")
+        text.append("  Tools:  ", style="dim")
         text.append(f"{self._app.agent.get_tool_count()}\n", style="info")
         skills = self._app.skills.list_skills()
-        text.append(f"  Skills: ", style="dim")
+        text.append("  Skills: ", style="dim")
         text.append(f"{len(skills)}\n", style="info")
-        text.append(f"  Wiki:   ", style="dim")
+        text.append("  Wiki:   ", style="dim")
         text.append(f"{self._app.settings.llm_wiki_path}\n", style="info")
         return Padding(text, (0, 0, 1, 0))
 
@@ -116,11 +130,12 @@ class CLIAdapter:
         git_branch = ""
         try:
             import subprocess
+
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True,
                 text=True,
-                cwd=Path.cwd()
+                cwd=Path.cwd(),
             )
             if result.returncode == 0 and result.stdout.strip():
                 git_branch = result.stdout.strip()
@@ -163,7 +178,16 @@ class CLIAdapter:
         self._console.print(text)
 
     def _create_completer(self) -> WordCompleter:
-        commands = ["/exit", "/clear", "/reset", "/help", "/skills", "/task", "/compress", "/soul"]
+        commands = [
+            "/exit",
+            "/clear",
+            "/reset",
+            "/help",
+            "/skills",
+            "/task",
+            "/compress",
+            "/soul",
+        ]
         skills = self._app.skills.list_skills()
         for skill in skills:
             if skill.slash_command:
@@ -173,7 +197,9 @@ class CLIAdapter:
     def _ask(self, prompt_text: str) -> str | None:
         try:
             self._print_statusline()
-            result = prompt(prompt_text, history=self._history, completer=self._completer)
+            result = prompt(
+                prompt_text, history=self._history, completer=self._completer
+            )
             sys.stdout.write("\n")
             sys.stdout.flush()
             return result
@@ -204,7 +230,11 @@ class CLIAdapter:
             return
         for skill in skills:
             cmd = skill.slash_command or f"/{skill.name}"
-            desc = skill.description[:50] + "..." if len(skill.description) > 50 else skill.description
+            desc = (
+                skill.description[:50] + "..."
+                if len(skill.description) > 50
+                else skill.description
+            )
             self._console.print(f"  {cmd:<12} - {desc}", style="info")
 
     def _handle_command(self, cmd: str) -> bool:
@@ -321,7 +351,10 @@ class CLIAdapter:
                 trigger_type = input("触发类型 (cron/interval/date): ").strip()
                 trigger_expr = input("触发表达式: ").strip()
                 task = self._app.tasks.add_task(
-                    name, trigger_type, trigger_expr, lambda: self._console.print(f"Task {name} executed")
+                    name,
+                    trigger_type,
+                    trigger_expr,
+                    lambda: self._console.print(f"Task {name} executed"),
                 )
                 self._console.print(f"已添加任务: {task.id}", style="info")
             elif action == "list":
@@ -331,7 +364,9 @@ class CLIAdapter:
                 else:
                     for t in tasks:
                         status = "启用" if t.enabled else "暂停"
-                        self._console.print(f"  [{t.id}] {t.name} ({status})", style="info")
+                        self._console.print(
+                            f"  [{t.id}] {t.name} ({status})", style="info"
+                        )
             elif action == "remove":
                 task_id = input("任务ID: ").strip()
                 if self._app.tasks.remove_task(task_id):
@@ -372,6 +407,14 @@ class CLIAdapter:
 
 
 def main() -> None:
+    args = sys.argv[1:]
+    if args and args[0] == "qq":
+        run_qq_bot()
+        return
+    if args and args[0] == "feishu":
+        run_feishu_bot()
+        return
+
     interaction_port = RichInteractionPort(Console(theme=THEME))
     app, runtime = assemble_control_plane(interaction_port=interaction_port)
     runtime.start()
@@ -380,6 +423,51 @@ def main() -> None:
         cli.run()
     finally:
         runtime.stop()
+
+
+def run_qq_bot() -> None:
+    console = Console(theme=THEME)
+    settings = Settings.from_env_and_args()
+    config = QQBotConfig.from_env(settings.workdir)
+
+    def log(message: str) -> None:
+        console.print(message, style="dim")
+
+    def create_control_plane():
+        return assemble_control_plane(
+            settings=settings,
+            interaction_port=QQInteractionPort(log),
+        )
+
+    channel_service = build_qq_channel_service(settings, create_control_plane)
+    runner = QQBotRunner(
+        config,
+        channel_service,
+        log=log,
+        log_dir=settings.workdir / ".hermes" / "logs",
+    )
+    console.print("QQ bot starting...", style="info")
+    runner.run()
+
+
+def run_feishu_bot() -> None:
+    console = Console(theme=THEME)
+    settings = Settings.from_env_and_args()
+    config = FeishuBotConfig.from_env(settings.workdir)
+
+    def log(message: str) -> None:
+        console.print(message, style="dim")
+
+    def create_control_plane():
+        return assemble_control_plane(
+            settings=settings,
+            interaction_port=FeishuInteractionPort(log),
+        )
+
+    channel_service = build_feishu_channel_service(settings, create_control_plane)
+    runner = FeishuBotRunner(config, channel_service, log=log)
+    console.print("Feishu bot starting...", style="info")
+    runner.run()
 
 
 if __name__ == "__main__":

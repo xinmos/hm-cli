@@ -16,7 +16,10 @@ class JsonChatStore:
         self._ensure_dirs()
 
     def list_chats(self) -> list[ChatSummary]:
-        chats = [self._to_chat_summary(item) for item in self._load_json(self._chats_file, default=[])]
+        chats = [
+            self._to_chat_summary(item)
+            for item in self._load_json(self._chats_file, default=[])
+        ]
         return sorted(chats, key=lambda item: item.updated_at, reverse=True)
 
     def create_chat(self, title: str, project_id: str | None = None) -> ChatSummary:
@@ -159,6 +162,7 @@ class JsonChatStore:
             content=item["content"],
             created_at=item["created_at"],
             tool_calls=item.get("tool_calls"),
+            metadata=item.get("metadata") or {},
         )
 
     def _message_to_dict(self, message: ChatMessageRecord) -> dict:
@@ -168,4 +172,5 @@ class JsonChatStore:
             "content": message.content,
             "created_at": message.created_at,
             "tool_calls": message.tool_calls,
+            "metadata": message.metadata,
         }

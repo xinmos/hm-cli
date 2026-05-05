@@ -51,12 +51,18 @@ import {
 import {
   deleteChat,
   fetchChats,
+  fetchFeishuConfig,
   fetchModelConfig,
+  fetchQQConfig,
   fetchWikiConfig,
   initializeWiki,
+  saveFeishuConfig,
   saveModelConfig,
+  saveQQConfig,
   saveWikiConfig,
+  type FeishuBotConfig,
   type ModelConfig,
+  type QQBotConfig,
   type WikiConfig,
 } from "@/lib/api";
 
@@ -68,6 +74,7 @@ interface SettingsPanelProps {
 type SettingsCategory =
   | "model"
   | "knowledge"
+  | "channels"
   | "permissions"
   | "data";
 
@@ -83,6 +90,27 @@ const defaultModelSettings: ModelConfig = {
   top_p: 1.0,
   streaming: true,
   custom_models: ["gpt-4o", "doubao-seed-2.0", "deepseek-chat", "qwen-max"],
+};
+
+const defaultQQSettings: QQBotConfig = {
+  app_id: "",
+  secret: "",
+  sandbox: false,
+  timeout: 5,
+  enable_guild: true,
+  enable_direct: true,
+  enable_group: true,
+  enable_c2c: true,
+  enable_markdown: true,
+};
+
+const defaultFeishuSettings: FeishuBotConfig = {
+  app_id: "",
+  app_secret: "",
+  verification_token: "",
+  encrypt_key: "",
+  domain: "https://open.feishu.cn",
+  auto_reconnect: true,
 };
 
 interface PermissionSettings {
@@ -162,6 +190,46 @@ function validateModelSettings(settings: ModelConfig): string | null {
   return null;
 }
 
+function normalizeQQSettings(settings: QQBotConfig): QQBotConfig {
+  return {
+    ...settings,
+    app_id: settings.app_id?.trim() || null,
+    secret: settings.secret?.trim() || null,
+    timeout: Number(settings.timeout),
+  };
+}
+
+function validateQQSettings(settings: QQBotConfig): string | null {
+  const normalized = normalizeQQSettings(settings);
+  if (!normalized.app_id && !normalized.secret) return null;
+  if (!normalized.app_id) return "QQ BotAppID 不能为空";
+  if (!normalized.secret) return "QQ AppSecret 不能为空";
+  if (!Number.isInteger(normalized.timeout) || normalized.timeout < 1) {
+    return "QQ Timeout 必须是正整数";
+  }
+  return null;
+}
+
+function normalizeFeishuSettings(settings: FeishuBotConfig): FeishuBotConfig {
+  return {
+    ...settings,
+    app_id: settings.app_id?.trim() || null,
+    app_secret: settings.app_secret?.trim() || null,
+    verification_token: settings.verification_token?.trim() || null,
+    encrypt_key: settings.encrypt_key?.trim() || null,
+    domain: settings.domain.trim() || "https://open.feishu.cn",
+  };
+}
+
+function validateFeishuSettings(settings: FeishuBotConfig): string | null {
+  const normalized = normalizeFeishuSettings(settings);
+  if (!normalized.app_id && !normalized.app_secret) return null;
+  if (!normalized.app_id) return "飞书 App ID 不能为空";
+  if (!normalized.app_secret) return "飞书 App Secret 不能为空";
+  if (!normalized.domain) return "飞书 OpenAPI 域名不能为空";
+  return null;
+}
+
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("model");
   const [isSaving, setIsSaving] = useState(false);
@@ -171,11 +239,19 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [modelSettings, setModelSettings] = useState<ModelConfig>(defaultModelSettings);
   const [envSettings, setEnvSettings] = useState<Partial<ModelConfig>>({});
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showQQSecret, setShowQQSecret] = useState(false);
+  const [showFeishuSecret, setShowFeishuSecret] = useState(false);
+  const [showFeishuVerificationToken, setShowFeishuVerificationToken] = useState(false);
+  const [showFeishuEncryptKey, setShowFeishuEncryptKey] = useState(false);
   const [newModelName, setNewModelName] = useState("");
   const [toast, setToast] = useState<ToastState>(null);
   const [wikiConfig, setWikiConfig] = useState<WikiConfig | null>(null);
   const [wikiPathDraft, setWikiPathDraft] = useState(".hermes/llm-wiki");
   const [isInitializingWiki, setIsInitializingWiki] = useState(false);
+  const [qqSettings, setQQSettings] = useState<QQBotConfig>(defaultQQSettings);
+  const [qqEnvSettings, setQQEnvSettings] = useState<Partial<QQBotConfig>>({});
+  const [feishuSettings, setFeishuSettings] = useState<FeishuBotConfig>(defaultFeishuSettings);
+  const [feishuEnvSettings, setFeishuEnvSettings] = useState<Partial<FeishuBotConfig>>({});
 
   const [dataTab, setDataTab] = useState<DataTab>("overview");
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -224,6 +300,26 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         console.error("Failed to load llm-wiki config:", error);
       });
 
+    fetchQQConfig()
+      .then((response) => {
+        if (cancelled) return;
+        setQQSettings(response.config);
+        setQQEnvSettings(response.env_masked);
+      })
+      .catch((error) => {
+        console.error("Failed to load QQ config:", error);
+      });
+
+    fetchFeishuConfig()
+      .then((response) => {
+        if (cancelled) return;
+        setFeishuSettings(response.config);
+        setFeishuEnvSettings(response.env_masked);
+      })
+      .catch((error) => {
+        console.error("Failed to load Feishu config:", error);
+      });
+
     fetchChats()
       .then((chats) => {
         if (cancelled) return;
@@ -259,6 +355,18 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         setSaveStatus("error");
         return;
       }
+      const qqValidationError = validateQQSettings(qqSettings);
+      if (activeCategory === "channels" && qqValidationError) {
+        setSaveStatus("error");
+        showToast(qqValidationError, "error");
+        return;
+      }
+      const feishuValidationError = validateFeishuSettings(feishuSettings);
+      if (activeCategory === "channels" && feishuValidationError) {
+        setSaveStatus("error");
+        showToast(feishuValidationError, "error");
+        return;
+      }
 
       if (activeCategory === "model") {
         const response = await saveModelConfig(normalizeModelSettings(modelSettings));
@@ -273,6 +381,15 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         const response = await saveWikiConfig(path);
         setWikiConfig(response);
         setWikiPathDraft(response.path);
+      } else if (activeCategory === "channels") {
+        const [qqResponse, feishuResponse] = await Promise.all([
+          saveQQConfig(normalizeQQSettings(qqSettings)),
+          saveFeishuConfig(normalizeFeishuSettings(feishuSettings)),
+        ]);
+        setQQSettings(qqResponse.config);
+        setQQEnvSettings(qqResponse.env_masked);
+        setFeishuSettings(feishuResponse.config);
+        setFeishuEnvSettings(feishuResponse.env_masked);
       } else {
         const settings = {
           permissions: permissionSettings,
@@ -291,6 +408,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const categories = [
     { id: "model" as const, name: "模型配置", icon: Key },
     { id: "knowledge" as const, name: "知识库", icon: FolderOpen },
+    { id: "channels" as const, name: "渠道配置", icon: MessageSquare },
     { id: "permissions" as const, name: "权限设置", icon: Shield },
     { id: "data" as const, name: "数据管理", icon: Database },
   ];
@@ -687,6 +805,315 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           </div>
         </div>
 
+      </div>
+    </div>
+  );
+
+  // Render channel settings
+  const renderChannelSettings = () => (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-medium mb-1">渠道配置</h3>
+        <p className="text-sm text-muted-foreground">配置外部聊天渠道，保存后机器人启动时会读取这里的参数</p>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-5">
+        <div className="rounded-md border bg-muted/20 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <span>QQ 官方机器人</span>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            使用腾讯官方 qq-botpy SDK。支持频道 @、频道私信、QQ群 @ 和好友私聊，聊天记录会写入 .hermes/qq。
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            {fieldLabel("BotAppID", "QQ 机器人开放平台开发设置里的 BotAppID。环境变量 HERMES_QQ_APP_ID 会覆盖页面配置。")}
+            <Input
+              value={qqSettings.app_id || ""}
+              placeholder={String(qqEnvSettings.app_id || "BotAppID")}
+              onChange={(event) =>
+                setQQSettings((prev) => ({ ...prev, app_id: event.target.value }))
+              }
+            />
+            {qqEnvSettings.app_id && (
+              <p className="text-xs text-muted-foreground">环境变量覆盖值：{String(qqEnvSettings.app_id)}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {fieldLabel("AppSecret", "QQ 机器人开放平台开发设置里的 AppSecret。环境变量 HERMES_QQ_SECRET 会覆盖页面配置。")}
+            <div className="relative">
+              <Input
+                type={showQQSecret ? "text" : "password"}
+                value={qqSettings.secret || ""}
+                placeholder={String(qqEnvSettings.secret || "AppSecret")}
+                onChange={(event) =>
+                  setQQSettings((prev) => ({ ...prev, secret: event.target.value }))
+                }
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 h-8 w-8"
+                onClick={() => setShowQQSecret((value) => !value)}
+              >
+                {showQQSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+            {qqEnvSettings.secret && (
+              <p className="text-xs text-muted-foreground">环境变量覆盖值：{String(qqEnvSettings.secret)}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {fieldLabel("Timeout", "QQ SDK HTTP 请求超时时间，单位秒。")}
+            <Input
+              type="number"
+              min="1"
+              value={qqSettings.timeout}
+              onChange={(event) =>
+                setQQSettings((prev) => ({ ...prev, timeout: Number(event.target.value) }))
+              }
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              {fieldLabel("沙箱环境", "开启后使用 QQ 机器人沙箱环境。上线到正式 QQ 环境前可先在沙箱验证。")}
+              <p className="text-xs text-muted-foreground">对应 HERMES_QQ_SANDBOX</p>
+            </div>
+            <Switch
+              checked={qqSettings.sandbox}
+              onCheckedChange={(checked) =>
+                setQQSettings((prev) => ({ ...prev, sandbox: checked }))
+              }
+            />
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <div>
+            <h4 className="text-sm font-medium">回复格式</h4>
+            <p className="text-xs text-muted-foreground">
+              QQ 官方机器人不支持同一条消息逐字流式更新；Hermes 会生成完整回复后发送。
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              {fieldLabel("Markdown 渲染", "使用 QQ 官方 markdown 消息格式发送最终回复。若平台或机器人权限不支持，会自动退回纯文本。")}
+              <p className="text-xs text-muted-foreground">对应 HERMES_QQ_ENABLE_MARKDOWN</p>
+            </div>
+            <Switch
+              checked={qqSettings.enable_markdown}
+              onCheckedChange={(checked) =>
+                setQQSettings((prev) => ({ ...prev, enable_markdown: checked }))
+              }
+            />
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <div>
+            <h4 className="text-sm font-medium">监听入口</h4>
+            <p className="text-xs text-muted-foreground">关闭某类入口后，启动 QQ bot 时不会订阅或处理对应事件</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {[
+              {
+                key: "enable_guild" as const,
+                title: "频道 @ 消息",
+                description: "on_at_message_create",
+              },
+              {
+                key: "enable_direct" as const,
+                title: "频道私信",
+                description: "on_direct_message_create",
+              },
+              {
+                key: "enable_group" as const,
+                title: "QQ群 @ 消息",
+                description: "on_group_at_message_create",
+              },
+              {
+                key: "enable_c2c" as const,
+                title: "好友私聊",
+                description: "on_c2c_message_create",
+              },
+            ].map((item) => (
+              <div key={item.key} className="flex items-center justify-between rounded-md border px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">{item.title}</p>
+                  <p className="text-xs text-muted-foreground">{item.description}</p>
+                </div>
+                <Switch
+                  checked={Boolean(qqSettings[item.key])}
+                  onCheckedChange={(checked) =>
+                    setQQSettings((prev) => ({ ...prev, [item.key]: checked }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-md border-l-2 border-l-primary bg-muted/20 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            <span>启动命令</span>
+          </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            保存后在终端运行 <span className="font-mono text-foreground">uv run python cli.py qq</span>。
+            如果同时设置了环境变量，环境变量会覆盖页面保存的值。
+          </p>
+        </div>
+
+        <Separator />
+
+        <div className="rounded-md border bg-muted/20 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <span>飞书机器人</span>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            使用官方 lark-oapi SDK 的 WebSocket 长连接接收消息事件，回复文本消息，聊天记录会写入 .hermes/feishu。
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            {fieldLabel("App ID", "飞书开放平台应用凭证里的 App ID。环境变量 HERMES_FEISHU_APP_ID 会覆盖页面配置。")}
+            <Input
+              value={feishuSettings.app_id || ""}
+              placeholder={String(feishuEnvSettings.app_id || "cli_xxx")}
+              onChange={(event) =>
+                setFeishuSettings((prev) => ({ ...prev, app_id: event.target.value }))
+              }
+            />
+            {feishuEnvSettings.app_id && (
+              <p className="text-xs text-muted-foreground">环境变量覆盖值：{String(feishuEnvSettings.app_id)}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {fieldLabel("App Secret", "飞书开放平台应用凭证里的 App Secret。环境变量 HERMES_FEISHU_APP_SECRET 会覆盖页面配置。")}
+            <div className="relative">
+              <Input
+                type={showFeishuSecret ? "text" : "password"}
+                value={feishuSettings.app_secret || ""}
+                placeholder={String(feishuEnvSettings.app_secret || "App Secret")}
+                onChange={(event) =>
+                  setFeishuSettings((prev) => ({ ...prev, app_secret: event.target.value }))
+                }
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 h-8 w-8"
+                onClick={() => setShowFeishuSecret((value) => !value)}
+              >
+                {showFeishuSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+            {feishuEnvSettings.app_secret && (
+              <p className="text-xs text-muted-foreground">环境变量覆盖值：{String(feishuEnvSettings.app_secret)}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {fieldLabel("Verification Token", "事件订阅里的 Verification Token。长连接模式可留空，若后续接 webhook 会用到。")}
+            <div className="relative">
+              <Input
+                type={showFeishuVerificationToken ? "text" : "password"}
+                value={feishuSettings.verification_token || ""}
+                placeholder={String(feishuEnvSettings.verification_token || "Verification Token")}
+                onChange={(event) =>
+                  setFeishuSettings((prev) => ({ ...prev, verification_token: event.target.value }))
+                }
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 h-8 w-8"
+                onClick={() => setShowFeishuVerificationToken((value) => !value)}
+              >
+                {showFeishuVerificationToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {fieldLabel("Encrypt Key", "事件订阅加密密钥。未开启事件加密可留空。")}
+            <div className="relative">
+              <Input
+                type={showFeishuEncryptKey ? "text" : "password"}
+                value={feishuSettings.encrypt_key || ""}
+                placeholder={String(feishuEnvSettings.encrypt_key || "Encrypt Key")}
+                onChange={(event) =>
+                  setFeishuSettings((prev) => ({ ...prev, encrypt_key: event.target.value }))
+                }
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 h-8 w-8"
+                onClick={() => setShowFeishuEncryptKey((value) => !value)}
+              >
+                {showFeishuEncryptKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {fieldLabel("OpenAPI 域名", "国内飞书使用 https://open.feishu.cn；海外 Lark 使用 https://open.larksuite.com。")}
+            <Input
+              value={feishuSettings.domain}
+              onChange={(event) =>
+                setFeishuSettings((prev) => ({ ...prev, domain: event.target.value }))
+              }
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              {fieldLabel("自动重连", "WebSocket 长连接断开后由官方 SDK 自动重连。")}
+              <p className="text-xs text-muted-foreground">对应 HERMES_FEISHU_AUTO_RECONNECT</p>
+            </div>
+            <Switch
+              checked={feishuSettings.auto_reconnect}
+              onCheckedChange={(checked) =>
+                setFeishuSettings((prev) => ({ ...prev, auto_reconnect: checked }))
+              }
+            />
+          </div>
+        </div>
+
+        <div className="rounded-md border-l-2 border-l-primary bg-muted/20 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            <span>启动命令</span>
+          </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            保存后在终端运行 <span className="font-mono text-foreground">uv run python cli.py feishu</span>。
+            需要在飞书开放平台开启机器人能力和消息事件订阅。
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -1275,6 +1702,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         return renderModelSettings();
       case "knowledge":
         return renderKnowledgeSettings();
+      case "channels":
+        return renderChannelSettings();
       case "permissions":
         return renderPermissionSettings();
       case "data":

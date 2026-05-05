@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Protocol
 
 
@@ -17,7 +17,9 @@ class AgentEvent:
 
 
 class AgentBackend(Protocol):
-    def stream(self, messages: list[Message], tools: list[Any] | None = None) -> Iterable[AgentEvent]:
+    def stream(
+        self, messages: list[Message], tools: list[Any] | None = None
+    ) -> Iterable[AgentEvent]:
         """Stream agent events given messages and optional tools"""
         ...
 
@@ -91,6 +93,44 @@ class ChatMessageRecord:
     content: str
     created_at: str
     tool_calls: list[Any] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ChannelConversationKey:
+    channel: str
+    conversation_id: str
+
+
+@dataclass
+class ChannelConversationLink:
+    channel: str
+    conversation_id: str
+    chat_id: str
+    created_at: str
+    updated_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ChannelInboundMessage:
+    channel: str
+    conversation_id: str
+    sender_id: str
+    text: str
+    message_id: str | None = None
+    sender_name: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ChannelOutboundMessage:
+    channel: str
+    conversation_id: str
+    text: str
+    chat_id: str
+    reply_to_message_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class TaskStore(Protocol):
@@ -126,6 +166,28 @@ class ChatStore(Protocol):
 
     def rename_chat(self, chat_id: str, title: str) -> ChatSummary | None:
         """Rename a chat and return the updated summary."""
+        ...
+
+
+class ChannelConversationStore(Protocol):
+    def get_link(self, key: ChannelConversationKey) -> ChannelConversationLink | None:
+        """Return the chat linked to an external channel conversation."""
+        ...
+
+    def save_link(self, link: ChannelConversationLink) -> None:
+        """Create or update a channel-to-chat link."""
+        ...
+
+    def list_links(self, channel: str | None = None) -> list[ChannelConversationLink]:
+        """Return channel conversation links sorted by most recent first."""
+        ...
+
+
+class ChannelGateway(Protocol):
+    channel: str
+
+    def send_message(self, message: ChannelOutboundMessage) -> None:
+        """Send an outbound message through the concrete channel."""
         ...
 
 
