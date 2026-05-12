@@ -185,11 +185,11 @@ function MessageItem({ message }: { message: Message }) {
     <div
       data-role={message.role}
       className={cn(
-        "chat-message-item px-4 md:px-6",
+        "chat-message-item px-4 py-2 md:px-6",
         isUser ? "bg-muted/30" : "bg-background"
       )}
     >
-      <div className="max-w-3xl mx-auto flex gap-4">
+      <div className="mx-auto flex max-w-3xl items-start gap-3">
         {/* Avatar */}
         <div className="flex-shrink-0">
           {isUser ? (
@@ -208,19 +208,19 @@ function MessageItem({ message }: { message: Message }) {
         </div>
 
         {/* Content */}
-        <div className={cn("min-w-0 flex-1", isAssistant ? "p-5" : "px-4 py-3")}>
-          <div className="mb-2 flex items-center gap-2">
-            <span className="font-medium text-sm">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex h-8 items-center gap-2">
+            <span className="text-sm font-medium leading-none">
               {isUser ? "你" : "Hermes"}
             </span>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs leading-none text-muted-foreground">
               {new Date(message.created_at).toLocaleTimeString("zh-CN", {
                 hour: "2-digit",
                 minute: "2-digit",
               })}
             </span>
             {isAssistant && message.isStreaming && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium leading-none text-blue-700">
                 <Sparkles className="h-3 w-3" />
                 {message.streamPhase === "thinking" ? "处理中" : "输出中"}
               </span>
@@ -231,13 +231,13 @@ function MessageItem({ message }: { message: Message }) {
             {message.isStreaming && message.streamPhase === "thinking" ? (
               <ThinkingStatus currentAction={message.currentAction} />
             ) : isUser ? (
-              <div className="whitespace-pre-wrap text-[15px] leading-[1.75]">{message.content}</div>
+              <div className="whitespace-pre-wrap text-[15px] leading-[1.65]">{message.content}</div>
             ) : (
               <MarkdownMessage content={message.content} isStreaming={message.isStreaming} />
             )}
           </div>
 
-          <div className="mt-3 flex justify-end">
+          <div className="mt-0.5 flex h-6 justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -245,7 +245,7 @@ function MessageItem({ message }: { message: Message }) {
                   aria-label="复制这条消息"
                   disabled={!canCopy}
                   onClick={handleCopy}
-                  className="flex h-7 w-7 items-center justify-center rounded-full bg-transparent text-[#6b7280] opacity-70 transition-all duration-150 ease-in-out hover:bg-[rgba(0,0,0,0.05)] hover:text-[#111827] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#6b7280]"
+                  className="flex h-6 w-6 items-center justify-center rounded-full bg-transparent text-[#6b7280] opacity-70 transition-all duration-150 ease-in-out hover:bg-[rgba(0,0,0,0.05)] hover:text-[#111827] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-[#6b7280]"
                 >
                   {isCopied ? (
                     <Check className="h-3.5 w-3.5" />

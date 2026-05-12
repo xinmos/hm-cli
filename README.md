@@ -18,14 +18,17 @@ uv run python cli.py qq
 uv run python cli.py feishu
 ```
 
-## Run Web mode (need two terminals)
-```bash
-# backend
-uv run python -m uvicorn web.backend.main:app --reload --port 8000
+## Run Web mode
 
-# frontend
-cd web/frontend && npm run dev
+```bash
+# one terminal starts backend + frontend
+uv run python cli.py web
+
+# or
+./web/start-dev.sh
 ```
+
+Press `Ctrl+C` in that terminal to stop both services together.
 
 ## Environment Variables
 

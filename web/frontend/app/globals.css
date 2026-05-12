@@ -80,11 +80,11 @@
   }
 
   .chat-message-item {
-    margin-bottom: 16px;
+    margin-bottom: 8px;
   }
 
   .chat-message-item[data-role="user"]:has(+ .chat-message-item[data-role="assistant"]) {
-    margin-bottom: 24px;
+    margin-bottom: 10px;
   }
 
   .chat-message-item:last-child {

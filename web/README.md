@@ -61,26 +61,40 @@ cd web/frontend
 npm install
 ```
 
-### 2. 启动后端
+### 2. 一键启动
 
 ```bash
 cd /Users/xinqiangxiong/codes/hm-cli
-uv sync --extra web
-uv run python -m uvicorn web.backend.main:app --reload --port 8000 --host 0.0.0.0
+uv run python cli.py web
 ```
 
-### 3. 启动前端
+也可以直接运行脚本：
 
 ```bash
-cd /Users/xinqiangxiong/codes/hm-cli/web/frontend
-npm run dev
+./web/start-dev.sh
 ```
 
-### 4. 访问
+同一个终端会同时托管后端和前端。按 `Ctrl+C` 会一起关闭两个服务。
+
+默认地址：
+
+```bash
+前端界面: http://localhost:3000
+后端 API: http://localhost:8000
+API 文档: http://localhost:8000/docs
+```
+
+如需换端口：
+
+```bash
+HERMES_WEB_BACKEND_PORT=8001 HERMES_WEB_FRONTEND_PORT=3001 uv run python cli.py web
+```
+
+### 3. 访问
 
 打开 http://localhost:3000
 
-### 5. 日志目录
+### 4. 日志目录
 
 开发日志统一写入：
 
@@ -95,7 +109,7 @@ npm run dev
 .hermes/logs/web-frontend.log
 ```
 
-### 6. Web 数据目录
+### 5. Web 数据目录
 
 Web 会话与聊天数据统一写入：
 

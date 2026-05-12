@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -408,6 +409,9 @@ class CLIAdapter:
 
 def main() -> None:
     args = sys.argv[1:]
+    if args and args[0] == "web":
+        run_web_dev(args[1:])
+        return
     if args and args[0] == "qq":
         run_qq_bot()
         return
@@ -423,6 +427,24 @@ def main() -> None:
         cli.run()
     finally:
         runtime.stop()
+
+
+def run_web_dev(args: list[str] | None = None) -> None:
+    project_root = Path(__file__).resolve().parents[3]
+    script_path = project_root / "web" / "start-dev.sh"
+
+    process = subprocess.Popen(
+        ["bash", str(script_path), *(args or [])],
+        cwd=project_root,
+    )
+    try:
+        sys.exit(process.wait())
+    except KeyboardInterrupt:
+        try:
+            sys.exit(process.wait(timeout=10))
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            sys.exit(130)
 
 
 def run_qq_bot() -> None:
