@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +14,8 @@ from hermes.app.ports import (
 )
 from hermes.app.settings import Settings
 from hermes.core.agent import AgentSession
+from hermes.core.memory import MemoryConfig
 from hermes.core.memory.memory_manager import MemoryManager
-from hermes.core.memory.models import MemoryConfig
 from hermes.core.soul import SoulIdentity, SoulLoader
 from hermes.infra.langchain.backend import LangChainOpenAIBackend
 from hermes.infra.langchain.tools import LangChainToolCatalog
@@ -108,49 +106,30 @@ class ControlPlaneApp:
         return instructions
 
     def _run_with_memory(self, user_input: str):
-        memory_context = ""
         if self.memory:
             try:
-                context = _run_coroutine_sync(
-                    self.memory.retrieve_relevant_context(
-                        query=user_input,
-                        max_tokens=2000,
-                    )
-                )
-                if not context.is_empty():
-                    memory_context = context.formatted_text
+                memory_context = self.memory.retrieve_context(user_input)
+                if memory_context:
+                    self.agent.prepend_context(memory_context)
                     if self.interaction:
                         self.interaction.notify_tool_start("memory")
                         self.interaction.notify_tool_complete("memory")
             except Exception:
                 pass
 
-        messages = self.agent.get_messages()
-        if memory_context and messages:
-            enhanced_messages = []
-            for msg in messages:
-                enhanced_messages.append(msg)
-                if msg.role == "system" and len(enhanced_messages) == 1:
-                    enhanced_messages.append(
-                        Message(role="system", content=f"[相关记忆]\n{memory_context}")
-                    )
-            messages = enhanced_messages
-
         full_response = ""
-        for chunk in self.agent.run_stream_with_messages(user_input, messages):
+        for chunk in self.agent.run_stream(user_input):
             full_response += chunk
             yield chunk
 
         if self.memory:
             try:
-                _run_coroutine_sync(
-                    self.memory.process_interaction(
-                        user_input=user_input,
-                        agent_response=full_response,
-                    )
+                self.memory.record_interaction(
+                    session_id=self.agent.session_id,
+                    user_input=user_input,
+                    agent_response=full_response,
                 )
             except Exception:
-                # 记忆保存失败不影响主流程
                 pass
 
 
@@ -232,23 +211,25 @@ def assemble_control_plane(
         soul_prompt = current_soul.to_system_prompt()
         full_system_prompt = f"{base_prompt}\n\n---\n\n{soul_prompt}"
 
+    # 初始化记忆系统
+    episodes_path = settings.workdir / ".hermes" / "episodes.json"
+    memory_config = MemoryConfig(
+        episodes_path=str(episodes_path),
+        importance_threshold=3,
+        max_working_messages=50,
+    )
+    memory_manager = MemoryManager(episodes_path=episodes_path, config=memory_config)
+
     agent_session = AgentSession(
         backend=agent_backend,
         system_prompt=full_system_prompt,
         interaction_port=interaction_port,
+        context_window=settings.context_window,
     )
     agent_session.set_tools(tool_catalog.get_tools())
 
     scheduler_driver: SchedulerDriver = APSchedulerDriver()
     task_service = TaskService(task_store, scheduler_driver)
-
-    # 初始化记忆系统
-    memory_config = MemoryConfig(
-        db_path=str(settings.workdir / ".hermes" / "memory.db"),
-        importance_threshold=3,
-        max_working_messages=50,
-    )
-    memory_manager = MemoryManager(config=memory_config)
 
     app = ControlPlaneApp(
         settings=settings,
@@ -292,9 +273,9 @@ def _build_system_prompt_base(settings: Settings | None, skill_repo: SkillReposi
         base_prompt += (
             "\n\n## 项目设置\n"
             f"- llm-wiki 知识库路径: `{settings.llm_wiki_path}`\n"
-            "- 当用户说“通过知识库回答”、“基于知识库回答”、“根据知识库”或类似表达时，"
-            "先调用 `load_skill(\"llm-wiki\")` 获取操作指令；如果目录未初始化，简短提醒用户在设置的知识库页面点击初始化，"
-            "用户明确要求你初始化时再调用 `init_llm_wiki`。"
+            '- 当用户说“通过知识库回答”、“基于知识库回答”、“根据知识库”或类似表达时，'
+            '先调用 `load_skill("llm-wiki")` 获取操作指令；如果目录未初始化，简短提醒用户在设置的知识库页面点击初始化，'
+            '用户明确要求你初始化时再调用 `init_llm_wiki`。'
         )
 
     if skill_repo is None:
@@ -309,27 +290,3 @@ def _build_system_prompt_base(settings: Settings | None, skill_repo: SkillReposi
         skill_section += f"- {skill.name}: {skill.description}\n"
 
     return base_prompt + skill_section
-
-
-def _run_coroutine_sync(coroutine: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine)
-
-    result: dict[str, Any] = {}
-    error: dict[str, Exception] = {}
-
-    def runner() -> None:
-        try:
-            result["value"] = asyncio.run(coroutine)
-        except Exception as exc:  # pragma: no cover - defensive bridge for async callers
-            error["value"] = exc
-
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
-    thread.join()
-
-    if "value" in error:
-        raise error["value"]
-    return result.get("value")

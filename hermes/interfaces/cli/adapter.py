@@ -282,36 +282,26 @@ class CLIAdapter:
         return True
 
     def _handle_compress(self) -> None:
-        """处理 /compress 命令 - 压缩记忆"""
-        if not self._app.memory:
-            self._console.print("[yellow]记忆系统未启用[/yellow]")
-            return
-
-        import asyncio
-        from hermes.core.memory.models import CompressionStrategy
-
+        """处理 /compress 命令 - 压缩上下文"""
         self._console.print("[cyan]选择压缩策略:[/]")
-        self._console.print("  1. flush    - 创建检查点")
-        self._console.print("  2. prune    - 裁剪低权重内容")
-        self._console.print("  3. summarize- 对旧记录生成摘要")
-        self._console.print("  4. segment  - 创建新的会话段")
+        self._console.print("  1. prune     - 保留 system + 最近消息，裁剪旧消息")
+        self._console.print("  2. summarize - 对旧消息生成摘要后压缩")
+        self._console.print("  3. segment   - 重置会话，仅保留 system prompt")
 
         try:
-            choice = input("选择 (1-4): ").strip()
-            strategy_map = {
-                "1": CompressionStrategy.FLUSH,
-                "2": CompressionStrategy.PRUNE,
-                "3": CompressionStrategy.SUMMARIZE,
-                "4": CompressionStrategy.SEGMENT,
-            }
+            choice = input("选择 (1-3): ").strip()
+            strategy_map = {"1": "prune", "2": "summarize", "3": "segment"}
 
             strategy = strategy_map.get(choice)
             if not strategy:
                 self._console.print("[red]无效选择[/red]")
                 return
 
-            result = asyncio.run(self._app.memory.compress_memory(strategy))
-            self._console.print(f"[green]压缩完成: {result}[/green]")
+            original = self._app.agent.get_message_count()
+            removed = self._app.agent.compact(strategy)
+            self._console.print(
+                f"[green]压缩完成 ({strategy}): {original} -> {self._app.agent.get_message_count()} 条消息[/green]"
+            )
 
         except Exception as e:
             self._console.print(f"[red]压缩失败: {e}[/red]")

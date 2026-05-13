@@ -1,3 +1,5 @@
+from hermes.core.memory.episode_store import EpisodeStore
+from hermes.core.memory.memory_manager import MemoryManager
 from hermes.core.memory.models import (
     CompressionStrategy,
     Episode,
@@ -8,14 +10,12 @@ from hermes.core.memory.models import (
     KnowledgeEdge,
     KnowledgeNode,
     MemoryConfig,
-    Message,
     RetrievedContext,
     Rule,
     ToolExecution,
     VectorStore,
     WorkingMemory,
 )
-from hermes.core.memory.working_memory import WorkingMemoryManager
 
 __all__ = [
     # 数据模型
@@ -28,12 +28,12 @@ __all__ = [
     "KnowledgeEdge",
     "KnowledgeNode",
     "MemoryConfig",
-    "Message",
     "RetrievedContext",
     "Rule",
     "ToolExecution",
     "VectorStore",
     "WorkingMemory",
-    # 管理器
-    "WorkingMemoryManager",
+    # 存储
+    "EpisodeStore",
+    "MemoryManager",
 ]
