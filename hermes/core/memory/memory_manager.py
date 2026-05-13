@@ -1,83 +1,79 @@
 from __future__ import annotations
 
+import hashlib
+import re
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from hermes.core.memory.bm25 import BM25Scorer, ScoredEpisode, fuse_results
+from hermes.core.memory.episode_store import EpisodeStore
 from hermes.core.memory.models import (
-    CompressionStrategy,
-    Episode,
     EntityRef,
+    Episode,
     EventType,
-    Goal,
-    KnowledgeNode,
     MemoryConfig,
-    Message,
-    RetrievedContext,
-    Rule,
     ToolExecution,
-    WorkingMemory,
 )
-from hermes.core.memory.working_memory import WorkingMemoryManager
-from hermes.infra.persistence.memory_stores import MemoryStore
+from hermes.core.memory.privacy_filter import filter_episode, filter_text
 
 
 class MemoryManager:
-    """记忆管理器 - 统一协调各记忆层"""
+    """记忆管理器 - 情景记录、BM25+关键词融合检索、隐私过滤、去重、衰减"""
 
     def __init__(
         self,
-        working_memory: WorkingMemory | None = None,
+        episodes_path: Path,
         config: MemoryConfig | None = None,
-        memory_store: MemoryStore | None = None,
+        knowledge_graph_path: Path | None = None,
     ) -> None:
-        self._config = config or MemoryConfig()
-        self._wm = working_memory or WorkingMemory()
-        self._wm_manager = WorkingMemoryManager(self._wm)
+        self._config = config or MemoryConfig(episodes_path=str(episodes_path))
+        self._store = EpisodeStore(
+            Path(self._config.episodes_path),
+            decay_rate=self._config.decay_rate,
+            min_retention_score=self._config.min_retention_score,
+        )
+        self._bm25 = BM25Scorer()
+        self._bm25_dirty = True
+        self._recent_hashes: dict[str, datetime] = {}
+        self._dedup_window = timedelta(minutes=5)
 
-        # 初始化存储
-        if memory_store is None:
-            db_path = Path(self._config.db_path)
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._store = MemoryStore(db_path)
-        else:
-            self._store = memory_store
+        self._kg = None
+        if knowledge_graph_path:
+            from hermes.core.memory.knowledge_graph import KnowledgeGraph
 
-        # 初始化组件
-        self._reflection_engine: Any = None  # 延迟加载
-        self._retrieval_engine: Any = None  # 延迟加载
+            self._kg = KnowledgeGraph(knowledge_graph_path)
 
-    @property
-    def working_memory(self) -> WorkingMemory:
-        """获取工作记忆"""
-        return self._wm
+    # ── write path ──────────────────────────────────────────────
 
-    @property
-    def config(self) -> MemoryConfig:
-        """获取配置"""
-        return self._config
-
-    async def process_interaction(
+    def record_interaction(
         self,
+        session_id: str,
         user_input: str,
         agent_response: str,
         tool_executions: list[ToolExecution] | None = None,
-    ) -> None:
-        """处理交互并触发记忆形成"""
+    ) -> Episode | None:
+        """记录一次交互，返回存储的 Episode 或 None（被去重/阈值过滤）"""
         tools = tool_executions or []
 
-        # 1. 记录到工作记忆
-        self._wm.add_message("user", user_input)
-        self._wm.add_message("assistant", agent_response)
+        # Dedup check (SHA-256, 5min window)
+        content_hash = hashlib.sha256(
+            f"{session_id}:{user_input[:200]}".encode()
+        ).hexdigest()
+        self._clean_stale_hashes()
+        if content_hash in self._recent_hashes:
+            return None
 
-        # 2. 创建情景记录
+        # Prune decayed before adding new
+        self._store.prune_decayed(datetime.now())
+
         episode = Episode(
             id=str(uuid.uuid4()),
             timestamp=datetime.now(),
             event_type=EventType.USER_MESSAGE,
-            session_id=self._wm.session_id,
-            summary=self._generate_summary(user_input, agent_response),
+            session_id=session_id,
+            summary=self._generate_summary(user_input),
             raw_data={
                 "user_input": user_input,
                 "agent_response": agent_response,
@@ -87,29 +83,98 @@ class MemoryManager:
             importance=self._calculate_importance(user_input, agent_response, tools),
             retention_score=1.0,
             tags=self._extract_tags(user_input),
+            content_hash=content_hash,
         )
 
-        # 3. 评估重要性并存储
-        if self._should_store_episode(episode):
-            self._store.episodic.append(episode)
+        # Privacy filter before persistence
+        filter_episode(episode)
 
-            # 4. 触发语义提取
-            await self._extract_semantic_knowledge(episode)
+        if episode.importance >= self._config.importance_threshold:
+            self._store.append(episode)
+            self._recent_hashes[content_hash] = datetime.now()
+            self._bm25_dirty = True
 
-    def _generate_summary(self, user_input: str, agent_response: str) -> str:
-        """生成摘要"""
-        # 简化实现：截取用户输入前100字符
+            # Feed knowledge graph
+            if self._kg and episode.entities:
+                try:
+                    self._kg.add_entities(episode.entities, episode.id)
+                except Exception:
+                    pass
+
+            return episode
+        return None
+
+    # ── read path ───────────────────────────────────────────────
+
+    def retrieve_context(
+        self,
+        query: str,
+        max_episodes: int = 5,
+        recent_days: int = 30,
+    ) -> str:
+        """检索相关上下文（BM25 + 关键词融合 + 图谱增强），返回格式化文本"""
+        now = datetime.now()
+        episodes = self._store.query_by_time(
+            now - timedelta(days=recent_days),
+            now,
+        )
+
+        if not episodes:
+            return ""
+
+        # BM25 scoring
+        if self._bm25_dirty or self._bm25.is_empty:
+            summaries = [ep.summary for ep in episodes]
+            self._bm25.fit(summaries)
+            self._bm25_dirty = False
+
+        bm25_scores = self._bm25.score(query)
+
+        # Keyword match scores
+        kw_scores = [self._keyword_match_score(query, ep.summary) for ep in episodes]
+
+        # Fuse
+        candidates = fuse_results(episodes, bm25_scores, kw_scores, alpha=0.6)
+
+        # Graph enrichment (1-hop from query entities)
+        if self._kg:
+            candidates = self._enrich_from_graph(query, episodes, candidates)
+
+        if not candidates:
+            return ""
+
+        # Session diversification (max 3 per session)
+        diversified = self._diversify(candidates, max_episodes)
+
+        # Record access (strengthens retrieved memories)
+        for scored in diversified:
+            try:
+                self._store.record_access(scored.episode.id, now)
+            except Exception:
+                pass
+
+        # Format output
+        parts: list[str] = ["## 相关历史记录"]
+        for scored in diversified:
+            ep = scored.episode
+            date_str = ep.timestamp.strftime("%Y-%m-%d")
+            parts.append(f"- [{date_str}] {ep.summary}")
+
+        result = "\n".join(parts)
+        return filter_text(result)
+
+    def get_stats(self) -> dict[str, Any]:
+        return self._store.get_stats()
+
+    # ── private helpers ─────────────────────────────────────────
+
+    def _generate_summary(self, user_input: str) -> str:
         if len(user_input) <= 100:
             return user_input
         return user_input[:100] + "..."
 
     def _extract_entities(self, user_input: str, agent_response: str) -> list[EntityRef]:
-        """提取实体引用"""
         entities: list[EntityRef] = []
-
-        # 简化实现：提取可能的文件路径
-        import re
-
         file_pattern = r"[\w\-/\\]+\.(py|js|ts|md|json|yaml|yml|txt)"
         for match in re.finditer(file_pattern, user_input + " " + agent_response):
             entities.append(
@@ -119,210 +184,109 @@ class MemoryManager:
                     name=match.group(0).split("/")[-1],
                 )
             )
-
         return entities
 
     def _calculate_importance(
-        self, user_input: str, agent_response: str, tool_executions: list[ToolExecution]
+        self,
+        user_input: str,
+        agent_response: str,
+        tool_executions: list[ToolExecution],
     ) -> int:
-        """计算重要性"""
         importance = 5
 
-        # 基于关键词调整
         important_keywords = ["重要", "关键", "必须", "记住", "保存", "配置"]
         if any(kw in user_input for kw in important_keywords):
             importance += 2
 
-        # 基于工具执行调整
         if tool_executions:
             importance += 1
-            # 如果有错误，重要性更高
             if any(t.error for t in tool_executions):
                 importance += 1
 
         return max(1, min(10, importance))
 
     def _extract_tags(self, user_input: str) -> list[str]:
-        """提取标签"""
         tags: list[str] = []
-
-        # 基于关键词标签化
         if any(kw in user_input for kw in ["代码", "编程", "函数", "类"]):
             tags.append("coding")
         if any(kw in user_input for kw in ["错误", "问题", "bug", "失败"]):
             tags.append("error")
         if any(kw in user_input for kw in ["配置", "设置", "参数"]):
             tags.append("config")
-
         return tags
 
-    def _should_store_episode(self, episode: Episode) -> bool:
-        """决定是否应该存储该情景"""
-        return episode.importance >= self._config.importance_threshold
+    def _extract_keywords(self, query: str) -> list[str]:
+        stop_words = {"我", "你", "是", "的", "了", "在", "有", "什么", "怎么", "如何", "吗", "呢", "请", "问"}
+        query_lower = query.lower()
+        keywords = [w for w in query_lower.split() if w not in stop_words and len(w) >= 2]
+        if not keywords:
+            keywords = re.findall(r"[一-龥]{2,}", query_lower)
+        return keywords
 
-    async def _extract_semantic_knowledge(self, episode: Episode) -> None:
-        """从情景中提取语义知识"""
-        # 简化实现：从用户偏好类型的episode中提取知识
-        if episode.event_type == EventType.USER_PREFERENCE:
-            for entity in episode.entities:
-                node = KnowledgeNode(
-                    id=str(uuid.uuid4()),
-                    entity_type="preference",
-                    name=entity.name,
-                    attributes={
-                        "entity_type": entity.entity_type,
-                        "source": episode.summary,
-                    },
-                    confidence=0.7,
-                    source_episodes=[episode.id],
-                )
-                self._store.semantic.add_node(node)
+    def _keyword_match_score(self, query: str, text: str) -> float:
+        keywords = self._extract_keywords(query)
+        if not keywords:
+            return 0.0
+        text_lower = text.lower()
+        hits = sum(1 for kw in keywords if kw in text_lower)
+        return hits / len(keywords)
 
-    async def retrieve_relevant_context(
+    def _diversify(
+        self, candidates: list[ScoredEpisode], max_episodes: int, max_per_session: int = 3
+    ) -> list[ScoredEpisode]:
+        session_counts: dict[str, int] = {}
+        diversified: list[ScoredEpisode] = []
+        for scored in candidates:
+            sid = scored.episode.session_id
+            count = session_counts.get(sid, 0)
+            if count < max_per_session:
+                diversified.append(scored)
+                session_counts[sid] = count + 1
+            if len(diversified) >= max_episodes:
+                break
+        return diversified
+
+    def _enrich_from_graph(
         self,
         query: str,
-        current_messages: list[Message] | None = None,
-        max_tokens: int = 4000,
-    ) -> RetrievedContext:
-        """检索相关上下文"""
-        # 简化实现：基于关键词的简单检索
-        context = RetrievedContext()
+        all_episodes: list[Episode],
+        candidates: list[ScoredEpisode],
+    ) -> list[ScoredEpisode]:
+        """Boost episodes that relate to graph entities found in the query."""
+        if not self._kg:
+            return candidates
 
-        # 1. 从情景记忆中检索
-        # 提取查询关键词（去掉疑问词）
-        query_lower = query.lower()
-        # 提取有意义的关键词（去掉常见疑问词和助词）
-        stop_words = {"我", "你", "是", "的", "了", "在", "有", "什么", "怎么", "如何", "吗", "呢", "请", "问"}
-        keywords = [w for w in query_lower.split() if w not in stop_words and len(w) >= 2]
+        entities = self._extract_entities(query, "")
+        if not entities:
+            return candidates
 
-        # 如果没有有效关键词，尝试提取所有中文字符
-        if not keywords:
-            import re
+        graph_episode_ids: set[str] = set()
+        for entity in entities:
+            related = self._kg.query_related_entities(entity.name)
+            for node, _edge in related:
+                graph_episode_ids.update(node.source_episodes)
 
-            keywords = re.findall(r"[\u4e00-\u9fa5]{2,}", query_lower)
+        if not graph_episode_ids:
+            return candidates
 
-        recent_episodes = self._store.episodic.query_by_time(
-            datetime.now() - timedelta(days=30),
-            datetime.now(),
-        )
+        existing_ids = {s.episode.id for s in candidates}
+        all_eps_by_id = {ep.id: ep for ep in all_episodes}
+        for ep_id in graph_episode_ids:
+            if ep_id not in existing_ids and ep_id in all_eps_by_id:
+                candidates.append(
+                    ScoredEpisode(
+                        episode=all_eps_by_id[ep_id],
+                        bm25_score=0.0,
+                        keyword_score=0.3,
+                        combined_score=0.21,  # 0.3 * 0.7 (graph bonus multiplier)
+                    )
+                )
 
-        for ep in recent_episodes:
-            summary_lower = ep.summary.lower()
-            # 检查是否有任何关键词匹配
-            for keyword in keywords:
-                if keyword in summary_lower:
-                    context.episodes.append(ep)
-                    context.relevance_scores[ep.id] = 0.8
-                    break
+        candidates.sort(key=lambda s: s.combined_score, reverse=True)
+        return candidates
 
-        # 2. 从工作记忆中获取高注意力内容
-        for key, weight in self._wm.attention_weights.items():
-            if weight > 0.7:
-                # 查找相关消息
-                for msg in self._wm.messages:
-                    if key.lower() in msg.content.lower():
-                        context.working_fragments.append(msg)
-                        break
-
-        # 3. 格式化上下文
-        context.formatted_text = self._format_context(context)
-
-        return context
-
-    def _format_context(self, context: RetrievedContext) -> str:
-        """格式化上下文为文本"""
-        parts: list[str] = []
-
-        if context.episodes:
-            parts.append("## 相关历史记录")
-            for ep in context.episodes[:5]:  # 限制数量
-                parts.append(f"- [{ep.timestamp.strftime('%Y-%m-%d')}] {ep.summary}")
-            parts.append("")
-
-        if context.working_fragments:
-            parts.append("## 当前关注")
-            for msg in context.working_fragments[:3]:
-                preview = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
-                parts.append(f"- {preview}")
-            parts.append("")
-
-        return "\n".join(parts)
-
-    async def compress_memory(self, strategy: CompressionStrategy) -> dict[str, Any]:
-        """执行记忆压缩"""
-        result: dict[str, Any] = {"strategy": strategy.value, "affected": 0}
-
-        if strategy == CompressionStrategy.FLUSH:
-            # 冲刷：创建检查点
-            result["checkpoint"] = self._create_checkpoint()
-
-        elif strategy == CompressionStrategy.PRUNE:
-            # 裁剪：移除低权重内容
-            removed = self._prune_working_memory()
-            result["removed_messages"] = removed
-            result["affected"] = removed
-
-        elif strategy == CompressionStrategy.SUMMARIZE:
-            # 摘要：对旧情景生成摘要
-            summarized = self._summarize_old_episodes()
-            result["summarized_episodes"] = summarized
-            result["affected"] = summarized
-
-        elif strategy == CompressionStrategy.SEGMENT:
-            # 分段：创建新的会话段
-            segment_id = self._create_session_segment()
-            result["segment_id"] = segment_id
-
-        return result
-
-    def _create_checkpoint(self) -> str:
-        """创建检查点"""
-        checkpoint_id = str(uuid.uuid4())[:8]
-        # 保存当前工作记忆状态
-        # 这里可以添加更多的检查点逻辑
-        return checkpoint_id
-
-    def _prune_working_memory(self) -> int:
-        """裁剪工作记忆中的低权重内容"""
-        if len(self._wm.messages) <= 10:
-            return 0
-
-        # 保留系统消息和高注意力消息
-        system_msgs = [m for m in self._wm.messages if m.role == "system"]
-        other_msgs = [m for m in self._wm.messages if m.role != "system"]
-
-        # 保留最近的消息
-        keep_count = min(20, len(other_msgs))
-        kept_msgs = other_msgs[-keep_count:]
-
-        removed = len(self._wm.messages) - len(system_msgs) - len(kept_msgs)
-        self._wm.messages = system_msgs + kept_msgs
-
-        return removed
-
-    def _summarize_old_episodes(self) -> int:
-        """对旧的情景记录生成摘要"""
-        # 简化实现：标记超过90天的记录为已归档
-        cutoff = datetime.now() - timedelta(days=90)
-        # 这里可以添加实际的摘要生成逻辑
-        return 0
-
-    def _create_session_segment(self) -> str:
-        """创建新的会话段"""
-        segment_id = str(uuid.uuid4())[:8]
-        # 重置工作记忆但保留系统消息
-        system_msgs = [m for m in self._wm.messages if m.role == "system"]
-        self._wm.messages = system_msgs
-        self._wm.active_goals.clear()
-        self._wm.tool_chain.clear()
-        self._wm.temp_vars.clear()
-        self._wm.session_start = datetime.now()
-        return segment_id
-
-    def get_store_stats(self) -> dict[str, Any]:
-        """获取存储统计"""
-        return self._store.get_stats()
-
-    def close(self) -> None:
-        """关闭记忆管理器"""
-        self._store.close()
+    def _clean_stale_hashes(self) -> None:
+        cutoff = datetime.now() - self._dedup_window * 2
+        stale = [h for h, ts in self._recent_hashes.items() if ts < cutoff]
+        for h in stale:
+            del self._recent_hashes[h]

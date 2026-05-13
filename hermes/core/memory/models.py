@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-import orjson
+from hermes.app.ports import Message
 
 
 class EventType(enum.Enum):
@@ -80,6 +80,9 @@ class Episode:
     retention_score: float = 1.0
     vector_embedding: list[float] | None = None
     tags: list[str] = field(default_factory=list)
+    content_hash: str | None = None
+    last_accessed: datetime | None = None
+    access_count: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.event_type, str):
@@ -98,6 +101,9 @@ class Episode:
             "retention_score": self.retention_score,
             "vector_embedding": self.vector_embedding,
             "tags": self.tags,
+            "content_hash": self.content_hash,
+            "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
+            "access_count": self.access_count,
         }
 
     def to_json(self) -> bytes:
@@ -117,6 +123,9 @@ class Episode:
             retention_score=data.get("retention_score", 1.0),
             vector_embedding=data.get("vector_embedding"),
             tags=data.get("tags", []),
+            content_hash=data.get("content_hash"),
+            last_accessed=datetime.fromisoformat(data["last_accessed"]) if data.get("last_accessed") else None,
+            access_count=data.get("access_count", 0),
         )
 
 
@@ -266,33 +275,6 @@ class Rule:
 
 
 @dataclass
-class Message:
-    """消息定义"""
-
-    role: str
-    content: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.now)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "role": self.role,
-            "content": self.content,
-            "metadata": self.metadata,
-            "timestamp": self.timestamp.isoformat(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Message":
-        return cls(
-            role=data["role"],
-            content=data["content"],
-            metadata=data.get("metadata", {}),
-            timestamp=datetime.fromisoformat(data.get("timestamp", datetime.now().isoformat())),
-        )
-
-
-@dataclass
 class Goal:
     """目标定义"""
 
@@ -398,7 +380,6 @@ class WorkingMemory:
     """工作记忆 - 当前会话状态"""
 
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    messages: list[Message] = field(default_factory=list)
     active_goals: list[Goal] = field(default_factory=list)
     attention_weights: dict[str, float] = field(default_factory=dict)
     tool_chain: list[ToolExecution] = field(default_factory=list)
@@ -409,7 +390,6 @@ class WorkingMemory:
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
-            "messages": [m.to_dict() for m in self.messages],
             "active_goals": [g.to_dict() for g in self.active_goals],
             "attention_weights": self.attention_weights,
             "tool_chain": [t.to_dict() for t in self.tool_chain],
@@ -422,7 +402,6 @@ class WorkingMemory:
     def from_dict(cls, data: dict[str, Any]) -> "WorkingMemory":
         return cls(
             session_id=data.get("session_id", str(uuid.uuid4())),
-            messages=[Message.from_dict(m) for m in data.get("messages", [])],
             active_goals=[Goal.from_dict(g) for g in data.get("active_goals", [])],
             attention_weights=data.get("attention_weights", {}),
             tool_chain=[ToolExecution.from_dict(t) for t in data.get("tool_chain", [])],
@@ -433,10 +412,6 @@ class WorkingMemory:
 
     def touch(self) -> None:
         self.last_activity = datetime.now()
-
-    def add_message(self, role: str, content: str, metadata: dict[str, Any] | None = None) -> None:
-        self.messages.append(Message(role=role, content=content, metadata=metadata or {}))
-        self.touch()
 
     def add_goal(self, description: str, priority: int = 5, parent_id: str | None = None) -> str:
         goal_id = str(uuid.uuid4())
@@ -470,11 +445,6 @@ class WorkingMemory:
     def update_attention(self, key: str, weight: float) -> None:
         self.attention_weights[key] = max(0.0, min(1.0, weight))
 
-    def get_context_window(self, max_messages: int = 20) -> list[Message]:
-        if len(self.messages) <= max_messages:
-            return list(self.messages)
-        return self.messages[-max_messages:]
-
     def clear_tool_chain(self) -> None:
         self.tool_chain.clear()
 
@@ -497,18 +467,18 @@ class RetrievedContext:
 class MemoryConfig:
     """记忆系统配置"""
 
-    db_path: str = "~/.hermes/memory.db"
+    episodes_path: str = "~/.hermes/episodes.json"
     enable_vector_store: bool = False
     max_working_messages: int = 50
     episodic_retention_days: int = 90
     importance_threshold: int = 3
-    enable_auto_compression: bool = True
-    compression_interval: int = 100
+    decay_rate: float = 0.01
+    min_retention_score: float = 0.1
 
     def __post_init__(self) -> None:
         from pathlib import Path
 
-        self.db_path = str(Path(self.db_path).expanduser())
+        self.episodes_path = str(Path(self.episodes_path).expanduser())
 
 
 class VectorStore(Protocol):
