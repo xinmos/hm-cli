@@ -213,12 +213,17 @@ def assemble_control_plane(
 
     # 初始化记忆系统
     episodes_path = settings.workdir / ".hermes" / "episodes.json"
+    kg_path = settings.workdir / ".hermes" / "knowledge_graph.json"
     memory_config = MemoryConfig(
         episodes_path=str(episodes_path),
         importance_threshold=3,
         max_working_messages=50,
     )
-    memory_manager = MemoryManager(episodes_path=episodes_path, config=memory_config)
+    memory_manager = MemoryManager(
+        episodes_path=episodes_path,
+        config=memory_config,
+        knowledge_graph_path=kg_path,
+    )
 
     agent_session = AgentSession(
         backend=agent_backend,

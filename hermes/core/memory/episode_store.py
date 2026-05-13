@@ -13,9 +13,17 @@ from hermes.core.memory.models import Episode
 class EpisodeStore:
     """JSON file-backed episode storage."""
 
-    def __init__(self, file_path: Path, max_episodes: int = 2000) -> None:
+    def __init__(
+        self,
+        file_path: Path,
+        max_episodes: int = 2000,
+        decay_rate: float = 0.01,
+        min_retention_score: float = 0.1,
+    ) -> None:
         self._path = file_path
         self._max_episodes = max_episodes
+        self._decay_rate = decay_rate
+        self._min_retention_score = min_retention_score
         self._episodes: dict[str, Episode] = {}
         self._load()
 
@@ -106,6 +114,42 @@ class EpisodeStore:
                     result.append(ep)
         result.sort(key=lambda ep: ep.timestamp, reverse=True)
         return result
+
+    def get_all(self) -> list[Episode]:
+        """Return all episodes as a list."""
+        return list(self._episodes.values())
+
+    def record_access(self, episode_id: str, now: datetime) -> None:
+        """Apply exponential decay and access boost to an episode."""
+        ep = self._episodes.get(episode_id)
+        if ep is None:
+            return
+
+        last_time = ep.last_accessed or ep.timestamp
+        days_since = (now - last_time).total_seconds() / 86400.0
+        # Apply decay since last access
+        decayed = ep.retention_score * (1 - self._decay_rate) ** days_since
+        # Boost on access (capped at 1.0)
+        ep.retention_score = min(1.0, decayed + 0.02)
+        ep.last_accessed = now
+        ep.access_count += 1
+
+    def prune_decayed(self, now: datetime) -> int:
+        """Remove episodes whose current decayed score falls below threshold."""
+        to_delete: list[str] = []
+        for ep in self._episodes.values():
+            last_time = ep.last_accessed or ep.timestamp
+            days_since = (now - last_time).total_seconds() / 86400.0
+            current_score = ep.retention_score * (1 - self._decay_rate) ** days_since
+            if current_score < self._min_retention_score:
+                to_delete.append(ep.id)
+
+        for eid in to_delete:
+            del self._episodes[eid]
+
+        if to_delete:
+            self._save()
+        return len(to_delete)
 
     def delete_old(self, before: datetime) -> int:
         removed = 0

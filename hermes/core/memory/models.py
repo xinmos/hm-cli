@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
-import orjson
+from hermes.app.ports import Message
 
 
 class EventType(enum.Enum):
@@ -80,6 +80,9 @@ class Episode:
     retention_score: float = 1.0
     vector_embedding: list[float] | None = None
     tags: list[str] = field(default_factory=list)
+    content_hash: str | None = None
+    last_accessed: datetime | None = None
+    access_count: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.event_type, str):
@@ -98,6 +101,9 @@ class Episode:
             "retention_score": self.retention_score,
             "vector_embedding": self.vector_embedding,
             "tags": self.tags,
+            "content_hash": self.content_hash,
+            "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
+            "access_count": self.access_count,
         }
 
     def to_json(self) -> bytes:
@@ -117,6 +123,9 @@ class Episode:
             retention_score=data.get("retention_score", 1.0),
             vector_embedding=data.get("vector_embedding"),
             tags=data.get("tags", []),
+            content_hash=data.get("content_hash"),
+            last_accessed=datetime.fromisoformat(data["last_accessed"]) if data.get("last_accessed") else None,
+            access_count=data.get("access_count", 0),
         )
 
 
@@ -463,6 +472,8 @@ class MemoryConfig:
     max_working_messages: int = 50
     episodic_retention_days: int = 90
     importance_threshold: int = 3
+    decay_rate: float = 0.01
+    min_retention_score: float = 0.1
 
     def __post_init__(self) -> None:
         from pathlib import Path
